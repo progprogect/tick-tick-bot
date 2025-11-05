@@ -151,7 +151,7 @@ class DataFetcher:
         project_id: Optional[str] = None
     ) -> Optional[Dict[str, Any]]:
         """
-        Fetch task by title (searches in cache first, then API)
+        Fetch task by title (searches only in API, not in cache)
         
         Args:
             title: Task title
@@ -160,28 +160,9 @@ class DataFetcher:
         Returns:
             Task data or None if not found
         """
-        self.logger.debug(f"Fetching task by title: '{title}' (project_id: {project_id})")
+        self.logger.info(f"[DataFetcher] Fetching task by title from API: '{title}' (project_id: {project_id})")
         
-        # First, try cache
-        task_id = self.cache.get_task_id_by_title(title, project_id)
-        if task_id:
-            task_data = self.cache.get_task_data(task_id)
-            if task_data:
-                # Return structured data similar to API response
-                result = {
-                    "id": task_id,
-                    "title": task_data.get("title", title),
-                    "projectId": task_data.get("project_id"),
-                    "status": 0 if task_data.get("status") == "active" else 2,
-                    "tags": task_data.get("tags", []),
-                    "content": task_data.get("notes", ""),
-                    "reminders": task_data.get("reminders", []),
-                    "repeatFlag": task_data.get("repeat_flag"),
-                }
-                self.logger.debug(f"Found task in cache: {task_id}")
-                return result
-        
-        # If not in cache, try API (may fail, but try anyway)
+        # Search only in API
         try:
             self.logger.debug(f"[DataFetcher] Searching in API for task: '{title}'")
             tasks = await self.client.get_tasks(project_id=project_id)
@@ -222,7 +203,7 @@ class DataFetcher:
             if matching_task:
                 task_id = matching_task.get("id")
                 task_title = matching_task.get("title", title)
-                # Cache it for future use
+                # Cache it for future use (for other operations)
                 self.cache.save_task(
                     task_id=task_id,
                     title=task_title,  # Use actual title from API
@@ -234,12 +215,12 @@ class DataFetcher:
                 self.logger.warning(f"[DataFetcher] Task not found in API: '{title}'")
                 # Log some task titles for debugging
                 if tasks:
-                    sample_titles = [t.get("title", "") for t in tasks[:5]]
+                    sample_titles = [t.get("title", "") for t in tasks[:10]]
                     self.logger.debug(f"[DataFetcher] Sample task titles from API: {sample_titles}")
         except Exception as e:
             self.logger.warning(f"[DataFetcher] Failed to search task in API: {e}", exc_info=True)
         
-        self.logger.warning(f"[DataFetcher] Task not found: '{title}' (searched in cache and API)")
+        self.logger.warning(f"[DataFetcher] Task not found: '{title}' (searched in API only)")
         return None
     
     async def fetch_project_by_name(self, name: str) -> Optional[Dict[str, Any]]:
