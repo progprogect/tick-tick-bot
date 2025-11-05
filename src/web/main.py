@@ -19,6 +19,8 @@ from src.services.note_manager import NoteManager
 from src.services.recurring_task_manager import RecurringTaskManager
 from src.services.reminder_manager import ReminderManager
 from src.services.analytics_service import AnalyticsService
+from src.services.smart_router import SmartRouter
+from src.services.task_modifier import TaskModifier
 from src.models.command import ActionType
 from src.utils.logger import logger
 from src.utils.error_handler import format_error_message
@@ -37,14 +39,29 @@ class TestBot:
         self.openai_client = OpenAIClient()
         self.voice_handler = VoiceHandler()
         self.text_handler = TextHandler()
-        self.gpt_service = GPTService()
+        self.gpt_service = GPTService(ticktick_client=self.ticktick_client)
         self.task_manager = TaskManager(self.ticktick_client)
+        self.task_modifier = TaskModifier(self.ticktick_client)
         self.batch_processor = BatchProcessor(self.ticktick_client)
         self.tag_manager = TagManager(self.ticktick_client)
         self.note_manager = NoteManager(self.ticktick_client)
         self.recurring_task_manager = RecurringTaskManager(self.ticktick_client)
         self.reminder_manager = ReminderManager(self.ticktick_client)
         self.analytics_service = AnalyticsService(self.ticktick_client, self.gpt_service)
+        
+        # Smart router for composite commands
+        self.smart_router = SmartRouter(
+            ticktick_client=self.ticktick_client,
+            task_manager=self.task_manager,
+            task_modifier=self.task_modifier,
+            tag_manager=self.tag_manager,
+            note_manager=self.note_manager,
+            recurring_task_manager=self.recurring_task_manager,
+            reminder_manager=self.reminder_manager,
+            batch_processor=self.batch_processor,
+            analytics_service=self.analytics_service,
+        )
+        
         self.logger = logger
     
     async def initialize(self):
@@ -61,6 +78,11 @@ class TestBot:
             
             parsed_command = await self.gpt_service.parse_command(processed_text)
             
+            # Check if composite command (new format with operations)
+            if parsed_command.is_composite():
+                return await self.smart_router.route(parsed_command)
+            
+            # Legacy format - use old routing
             action = parsed_command.action
             
             if action == ActionType.CREATE_TASK:
