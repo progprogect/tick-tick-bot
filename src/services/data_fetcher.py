@@ -183,26 +183,63 @@ class DataFetcher:
         
         # If not in cache, try API (may fail, but try anyway)
         try:
+            self.logger.debug(f"[DataFetcher] Searching in API for task: '{title}'")
             tasks = await self.client.get_tasks(project_id=project_id)
+            self.logger.debug(f"[DataFetcher] Retrieved {len(tasks)} tasks from API")
+            
+            # Normalize for comparison
+            def normalize_title(t: str) -> str:
+                """Normalize title for comparison"""
+                if not t:
+                    return ""
+                import re
+                return re.sub(r'\s+', ' ', t.lower().strip())
+            
+            search_title_normalized = normalize_title(title)
+            
+            # First try exact match
             matching_task = next(
-                (t for t in tasks if t.get("title", "").lower() == title.lower()),
+                (t for t in tasks if normalize_title(t.get("title", "")) == search_title_normalized),
                 None
             )
             
+            # If exact match not found, try partial match
+            if not matching_task:
+                self.logger.debug(f"[DataFetcher] Exact match not found, trying partial match...")
+                matches = []
+                for t in tasks:
+                    task_title_normalized = normalize_title(t.get("title", ""))
+                    if (search_title_normalized in task_title_normalized or 
+                        task_title_normalized in search_title_normalized):
+                        matches.append((t, len(task_title_normalized)))
+                
+                if matches:
+                    # Prefer longer match (more specific)
+                    matches.sort(key=lambda x: x[1], reverse=True)
+                    matching_task = matches[0][0]
+                    self.logger.info(f"[DataFetcher] Partial match found in API: '{matching_task.get('title')}' for search '{title}'")
+            
             if matching_task:
                 task_id = matching_task.get("id")
+                task_title = matching_task.get("title", title)
                 # Cache it for future use
                 self.cache.save_task(
                     task_id=task_id,
-                    title=title,
+                    title=task_title,  # Use actual title from API
                     project_id=matching_task.get("projectId") or project_id,
                 )
-                self.logger.debug(f"Found task in API: {task_id}")
+                self.logger.info(f"[DataFetcher] Found task in API: {task_id} ('{task_title}')")
                 return matching_task
+            else:
+                self.logger.warning(f"[DataFetcher] Task not found in API: '{title}'")
+                # Log some task titles for debugging
+                if tasks:
+                    sample_titles = [t.get("title", "") for t in tasks[:5]]
+                    self.logger.debug(f"[DataFetcher] Sample task titles from API: {sample_titles}")
         except Exception as e:
-            self.logger.warning(f"Failed to search task in API: {e}")
+            self.logger.warning(f"[DataFetcher] Failed to search task in API: {e}", exc_info=True)
         
-        self.logger.debug(f"Task not found: '{title}'")
+        self.logger.warning(f"[DataFetcher] Task not found: '{title}' (searched in cache and API)")
         return None
     
     async def fetch_project_by_name(self, name: str) -> Optional[Dict[str, Any]]:

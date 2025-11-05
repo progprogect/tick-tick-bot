@@ -53,7 +53,7 @@ class TaskCacheService:
     
     def get_task_id_by_title(self, title: str, project_id: Optional[str] = None) -> Optional[str]:
         """
-        Get task ID by title
+        Get task ID by title (flexible matching)
         
         Args:
             title: Task title
@@ -65,17 +65,72 @@ class TaskCacheService:
         # Reload cache before search to get latest data (in case another process updated it)
         self._load_cache()
         
-        # Search by title (case-insensitive)
-        # Only search active tasks (not completed or deleted)
-        title_lower = title.lower()
+        # Normalize title: lowercase, strip, normalize spaces
+        def normalize_title(t: str) -> str:
+            """Normalize title for comparison"""
+            if not t:
+                return ""
+            # Lowercase, strip, replace multiple spaces with single space
+            import re
+            normalized = re.sub(r'\s+', ' ', t.lower().strip())
+            return normalized
+        
+        search_title_normalized = normalize_title(title)
+        self.logger.debug(f"[TaskCache] Searching for title: '{title}' (normalized: '{search_title_normalized}')")
+        
+        # First, try exact match (after normalization)
         for task_id, task_data in self._cache.items():
             # Skip completed or deleted tasks
             if task_data.get('status') in ('completed', 'deleted'):
                 continue
-            if task_data.get('title', '').lower() == title_lower:
+            
+            cached_title = task_data.get('title', '')
+            cached_title_normalized = normalize_title(cached_title)
+            
+            if cached_title_normalized == search_title_normalized:
                 # If project_id specified, check it matches
                 if project_id is None or task_data.get('project_id') == project_id:
+                    self.logger.debug(f"[TaskCache] Exact match found: '{cached_title}' -> {task_id}")
                     return task_id
+        
+        # If exact match not found, try partial match (contains)
+        self.logger.debug(f"[TaskCache] Exact match not found, trying partial match...")
+        matches = []
+        for task_id, task_data in self._cache.items():
+            # Skip completed or deleted tasks
+            if task_data.get('status') in ('completed', 'deleted'):
+                continue
+            
+            cached_title = task_data.get('title', '')
+            cached_title_normalized = normalize_title(cached_title)
+            
+            # Check if search title is contained in cached title or vice versa
+            if (search_title_normalized in cached_title_normalized or 
+                cached_title_normalized in search_title_normalized):
+                # If project_id specified, check it matches
+                if project_id is None or task_data.get('project_id') == project_id:
+                    matches.append((task_id, cached_title, cached_title_normalized))
+        
+        if matches:
+            # Prefer longer match (more specific)
+            matches.sort(key=lambda x: len(x[2]), reverse=True)
+            best_match = matches[0]
+            self.logger.info(f"[TaskCache] Partial match found: '{best_match[1]}' (normalized: '{best_match[2]}') -> {best_match[0]} for search '{title}'")
+            if len(matches) > 1:
+                self.logger.warning(f"[TaskCache] Multiple matches found: {[m[1] for m in matches]}, using '{best_match[1]}'")
+            return best_match[0]
+        
+        # Log available tasks for debugging
+        active_tasks = [
+            (tid, tdata.get('title', '')) 
+            for tid, tdata in self._cache.items() 
+            if tdata.get('status') not in ('completed', 'deleted')
+        ]
+        if active_tasks:
+            task_titles = [f"'{t[1]}' (id: {t[0]})" for t in active_tasks[:10]]
+            self.logger.debug(f"[TaskCache] Available tasks in cache: {', '.join(task_titles)}{'...' if len(active_tasks) > 10 else ''}")
+        
+        self.logger.warning(f"[TaskCache] Task not found: '{title}' (normalized: '{search_title_normalized}')")
         return None
     
     def save_task(
