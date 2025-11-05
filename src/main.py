@@ -34,7 +34,7 @@ class TickTickBot:
         self.openai_client = OpenAIClient()
         self.voice_handler = VoiceHandler()
         self.text_handler = TextHandler()
-        self.gpt_service = GPTService()
+        self.gpt_service = GPTService(ticktick_client=self.ticktick_client)
         self.task_manager = TaskManager(self.ticktick_client)
         self.task_modifier = TaskModifier(self.ticktick_client)
         self.batch_processor = BatchProcessor(self.ticktick_client)
@@ -71,6 +71,21 @@ class TickTickBot:
             Response message
         """
         try:
+            # Ensure client is available
+            if not self.ticktick_client:
+                self.logger.error("[TickTickBot] TickTick client is None in handle_message!")
+                return "Ошибка: TickTick клиент не инициализирован. Попробуйте позже."
+            
+            # Ensure GPT service has client
+            if not self.gpt_service.ticktick_client:
+                self.logger.warning("[TickTickBot] GPT service lost ticktick_client reference, re-assigning...")
+                self.gpt_service.ticktick_client = self.ticktick_client
+            
+            # Ensure client is authenticated
+            if not hasattr(self.ticktick_client, 'access_token') or not self.ticktick_client.access_token:
+                self.logger.info("[TickTickBot] Authenticating TickTick client...")
+                await self.ticktick_client.authenticate()
+            
             # Process text
             processed_text = self.text_handler.process(message_text)
             

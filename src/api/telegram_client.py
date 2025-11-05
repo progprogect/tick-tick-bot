@@ -21,6 +21,9 @@ class TelegramClient:
         self.logger = logger
         self._message_handler: Optional[Callable[[str, str], Awaitable[str]]] = None
         self._voice_handler: Optional[Callable[[bytes, str], Awaitable[str]]] = None
+        
+        # Add error handler for Conflict errors
+        self.application.add_error_handler(self._handle_error)
     
     def set_message_handler(self, handler: Callable[[str, str], Awaitable[str]]):
         """
@@ -193,6 +196,20 @@ class TelegramClient:
         )
         await update.message.reply_text(help_message, parse_mode='Markdown')
     
+    async def _handle_error(self, update: object, context: ContextTypes.DEFAULT_TYPE):
+        """Handle errors in polling loop"""
+        error = context.error
+        if isinstance(error, Conflict):
+            self.logger.warning(
+                f"Conflict error in polling loop: {error}. "
+                "Another bot instance is running. This is expected if multiple instances exist."
+            )
+            # Don't re-raise - just log and continue
+            return
+        else:
+            # Log other errors
+            self.logger.error(f"Error in polling loop: {error}", exc_info=error)
+    
     def setup_handlers(self):
         """Setup message handlers"""
         # Command handlers
@@ -243,10 +260,15 @@ class TelegramClient:
             except Conflict as e:
                 self.logger.warning(
                     f"Telegram bot conflict detected: {e}. "
-                    "Another bot instance may be running. Continuing anyway..."
+                    "Another bot instance may be running. Stopping polling but keeping bot alive..."
                 )
+                # Stop polling to avoid continuous errors, but keep bot alive for web interface
+                try:
+                    await self.application.updater.stop()
+                except:
+                    pass
                 # Don't raise - allow bot to continue (for web interface compatibility)
-                self.logger.info("Telegram bot initialized (polling conflict ignored)")
+                self.logger.info("Telegram bot initialized (polling stopped due to conflict, web interface still available)")
         except Exception as e:
             self.logger.error(f"Error starting Telegram bot: {e}", exc_info=True)
             raise
