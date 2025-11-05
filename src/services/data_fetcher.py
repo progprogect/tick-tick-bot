@@ -166,7 +166,21 @@ class DataFetcher:
         try:
             self.logger.debug(f"[DataFetcher] Searching in API for task: '{title}'")
             tasks = await self.client.get_tasks(project_id=project_id)
-            self.logger.debug(f"[DataFetcher] Retrieved {len(tasks)} tasks from API")
+            self.logger.info(f"[DataFetcher] Retrieved {len(tasks)} tasks from API")
+            
+            # Log ALL task titles for debugging
+            if tasks:
+                all_titles = [t.get("title", "") for t in tasks]
+                self.logger.info(f"[DataFetcher] All task titles from API ({len(all_titles)} tasks): {all_titles}")
+                
+                # Also log task IDs and projects for debugging
+                task_details = [
+                    f"'{t.get('title', '')}' (id: {t.get('id', 'N/A')}, projectId: {t.get('projectId', 'N/A')})"
+                    for t in tasks[:20]
+                ]
+                self.logger.debug(f"[DataFetcher] Task details: {task_details}")
+            else:
+                self.logger.warning(f"[DataFetcher] No tasks returned from API (empty list or None)")
             
             # Normalize for comparison
             def normalize_title(t: str) -> str:
@@ -177,6 +191,7 @@ class DataFetcher:
                 return re.sub(r'\s+', ' ', t.lower().strip())
             
             search_title_normalized = normalize_title(title)
+            self.logger.debug(f"[DataFetcher] Searching for normalized title: '{search_title_normalized}'")
             
             # First try exact match
             matching_task = next(
@@ -184,21 +199,27 @@ class DataFetcher:
                 None
             )
             
-            # If exact match not found, try partial match
-            if not matching_task:
+            if matching_task:
+                self.logger.info(f"[DataFetcher] Exact match found: '{matching_task.get('title')}'")
+            else:
                 self.logger.debug(f"[DataFetcher] Exact match not found, trying partial match...")
+                
+                # If exact match not found, try partial match
                 matches = []
                 for t in tasks:
-                    task_title_normalized = normalize_title(t.get("title", ""))
+                    task_title = t.get("title", "")
+                    task_title_normalized = normalize_title(task_title)
                     if (search_title_normalized in task_title_normalized or 
                         task_title_normalized in search_title_normalized):
-                        matches.append((t, len(task_title_normalized)))
+                        matches.append((t, len(task_title_normalized), task_title))
                 
                 if matches:
                     # Prefer longer match (more specific)
                     matches.sort(key=lambda x: x[1], reverse=True)
                     matching_task = matches[0][0]
-                    self.logger.info(f"[DataFetcher] Partial match found in API: '{matching_task.get('title')}' for search '{title}'")
+                    self.logger.info(f"[DataFetcher] Partial match found in API: '{matches[0][2]}' (normalized: '{normalize_title(matches[0][2])}') for search '{title}' (normalized: '{search_title_normalized}')")
+                    if len(matches) > 1:
+                        self.logger.warning(f"[DataFetcher] Multiple partial matches found: {[m[2] for m in matches]}, using '{matches[0][2]}'")
             
             if matching_task:
                 task_id = matching_task.get("id")
@@ -212,11 +233,11 @@ class DataFetcher:
                 self.logger.info(f"[DataFetcher] Found task in API: {task_id} ('{task_title}')")
                 return matching_task
             else:
-                self.logger.warning(f"[DataFetcher] Task not found in API: '{title}'")
-                # Log some task titles for debugging
+                self.logger.warning(f"[DataFetcher] Task not found in API: '{title}' (normalized: '{search_title_normalized}')")
+                # Log normalized titles for comparison
                 if tasks:
-                    sample_titles = [t.get("title", "") for t in tasks[:10]]
-                    self.logger.debug(f"[DataFetcher] Sample task titles from API: {sample_titles}")
+                    normalized_titles = [normalize_title(t.get("title", "")) for t in tasks]
+                    self.logger.debug(f"[DataFetcher] Normalized task titles from API: {normalized_titles}")
         except Exception as e:
             self.logger.warning(f"[DataFetcher] Failed to search task in API: {e}", exc_info=True)
         
