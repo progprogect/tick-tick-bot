@@ -226,6 +226,9 @@ class TickTickBot:
                     start_date=command.start_date,
                     end_date=command.end_date,
                     project_id=command.project_id,
+                    query_type=command.query_type,
+                    limit=command.limit,
+                    sort_by=command.sort_by,
                 )
             
             else:

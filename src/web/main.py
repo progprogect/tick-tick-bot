@@ -168,6 +168,9 @@ class TestBot:
                     start_date=parsed_command.start_date,
                     end_date=parsed_command.end_date,
                     project_id=parsed_command.project_id,
+                    query_type=parsed_command.query_type,
+                    limit=parsed_command.limit,
+                    sort_by=parsed_command.sort_by,
                 )
             
             else:

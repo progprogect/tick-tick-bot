@@ -196,6 +196,9 @@ class AnalyticsService:
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
         project_id: Optional[str] = None,
+        query_type: Optional[str] = None,
+        limit: Optional[int] = None,
+        sort_by: Optional[str] = None,
     ) -> str:
         """
         List tasks for a given date range with intelligent formatting
@@ -216,6 +219,91 @@ class AnalyticsService:
                 start_date=start_date,
                 end_date=end_date,
             )
+            
+            # Step 1.5: Additional strict filtering by date if dates are specified
+            # This ensures we only show tasks for the requested date range
+            if start_date and end_date:
+                try:
+                    from datetime import datetime, timezone
+                    start_dt = datetime.fromisoformat(start_date.replace('Z', '+00:00'))
+                    end_dt = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
+                    
+                    # Ensure timezone-aware
+                    if start_dt.tzinfo is None:
+                        start_dt = start_dt.replace(tzinfo=timezone.utc)
+                    if end_dt.tzinfo is None:
+                        end_dt = end_dt.replace(tzinfo=timezone.utc)
+                    
+                    filtered_tasks = []
+                    for task in tasks:
+                        task_due_date_str = task.get('dueDate')
+                        if not task_due_date_str:
+                            # Skip tasks without due date if date filter is specified
+                            continue
+                        
+                        try:
+                            task_due_date = datetime.fromisoformat(task_due_date_str.replace('Z', '+00:00'))
+                            if task_due_date.tzinfo is None:
+                                task_due_date = task_due_date.replace(tzinfo=timezone.utc)
+                            
+                            # Check if task is within date range
+                            if start_dt <= task_due_date <= end_dt:
+                                filtered_tasks.append(task)
+                        except Exception as e:
+                            self.logger.warning(f"Failed to parse dueDate for task {task.get('id')}: {e}")
+                            continue
+                    
+                    tasks = filtered_tasks
+                    self.logger.info(f"[AnalyticsService] After strict date filtering: {len(tasks)} tasks remain")
+                except Exception as e:
+                    self.logger.warning(f"Failed to apply strict date filtering: {e}")
+                    # Continue with original tasks if filtering fails
+            
+            # Step 1.6: Sort and limit based on query context
+            if sort_by:
+                try:
+                    from datetime import datetime, timezone
+                    reverse_order = False  # Default: ascending
+                    
+                    if sort_by == "createdTime":
+                        # Sort by createdTime (most recent first)
+                        reverse_order = True
+                        def get_created_time(task):
+                            """Get createdTime as datetime, handling missing or invalid values"""
+                            created_time_str = task.get("createdTime")
+                            if not created_time_str:
+                                # If no createdTime, use a very old date so it appears last
+                                return datetime(1970, 1, 1, tzinfo=timezone.utc)
+                            try:
+                                # Try to parse ISO format
+                                dt = datetime.fromisoformat(created_time_str.replace('Z', '+00:00'))
+                                if dt.tzinfo is None:
+                                    dt = dt.replace(tzinfo=timezone.utc)
+                                return dt
+                            except Exception:
+                                # If parsing fails, use old date
+                                return datetime(1970, 1, 1, tzinfo=timezone.utc)
+                        
+                        tasks.sort(key=get_created_time, reverse=reverse_order)
+                        self.logger.info(f"[AnalyticsService] Sorted {len(tasks)} tasks by createdTime")
+                    elif sort_by == "dueDate":
+                        # Sort by dueDate (earliest first)
+                        tasks.sort(
+                            key=lambda t: (
+                                datetime.fromisoformat(t.get("dueDate", "9999-12-31T23:59:59Z").replace('Z', '+00:00'))
+                                if t.get("dueDate") else datetime(9999, 12, 31, tzinfo=timezone.utc)
+                            ),
+                            reverse=False
+                        )
+                        self.logger.info(f"[AnalyticsService] Sorted {len(tasks)} tasks by dueDate")
+                except Exception as e:
+                    self.logger.warning(f"Failed to sort tasks: {e}")
+            
+            # Apply limit if specified
+            if limit and limit > 0:
+                original_count = len(tasks)
+                tasks = tasks[:limit]
+                self.logger.info(f"[AnalyticsService] Limited to {limit} tasks (from {original_count})")
             
             if not tasks:
                 if start_date and end_date:
@@ -242,7 +330,49 @@ class AnalyticsService:
             
             # Step 4: Use GPT to create intelligent summary
             try:
-                prompt = f"""Пользователь спрашивает о своих задачах{date_range}.
+                # Determine prompt based on query type
+                if query_type == "last_created" and limit == 1:
+                    # Show only the last created task
+                    prompt = f"""Пользователь спрашивает о последней созданной задаче.
+
+Вот задача:
+{tasks_data}
+
+Создай краткий, дружелюбный ответ на русском языке, который:
+1. Показывает информацию об этой задаче
+2. Указывает название, дату создания, приоритет и другие важные детали
+3. Будь кратким (1-2 предложения) и дружелюбным
+
+Ответ должен начинаться с "📋" и быть естественным, как будто ты личный ассистент."""
+                elif query_type == "first_created" and limit == 1:
+                    # Show only the first created task
+                    prompt = f"""Пользователь спрашивает о первой созданной задаче.
+
+Вот задача:
+{tasks_data}
+
+Создай краткий, дружелюбный ответ на русском языке, который:
+1. Показывает информацию об этой задаче
+2. Указывает название, дату создания, приоритет и другие важные детали
+3. Будь кратким (1-2 предложения) и дружелюбным
+
+Ответ должен начинаться с "📋" и быть естественным, как будто ты личный ассистент."""
+                elif limit and limit <= 5:
+                    # Show limited number of tasks
+                    prompt = f"""Пользователь спрашивает о задачах{date_range}.
+
+Вот список задач ({len(tasks)} задач):
+{tasks_data}
+
+Создай краткий, дружелюбный ответ на русском языке, который:
+1. Кратко описывает найденные задачи
+2. Выделяет самые важные/срочные задачи (если есть)
+3. Будь кратким (2-3 предложения) и дружелюбным
+
+Ответ должен начинаться с "📋" и быть естественным, как будто ты личный ассистент."""
+                else:
+                    # Show all tasks (default behavior)
+                    prompt = f"""Пользователь спрашивает о своих задачах{date_range}.
 
 Вот список задач:
 {tasks_data}
@@ -261,8 +391,10 @@ class AnalyticsService:
                 ])
                 
                 # Add task list below GPT summary
+                # For single task queries, show full details; for others, limit to 10
+                display_limit = 1 if (query_type in ("last_created", "first_created") and limit == 1) else min(10, len(tasks))
                 formatted_list = []
-                for task in tasks[:10]:  # Limit to 10 for display
+                for task in tasks[:display_limit]:
                     title = task.get('title', 'Без названия')
                     due_date = task.get('dueDate', '')
                     priority = task.get('priority', 0)
@@ -294,11 +426,18 @@ class AnalyticsService:
                     formatted_list.append(task_line)
                 
                 result = gpt_response.strip()
-                if formatted_list:
-                    result += f"\n\n📝 Список задач:\n" + "\n".join(formatted_list)
-                if len(tasks) > 10:
-                    result += f"\n\n... и еще {len(tasks) - 10} задач"
-                result += f"\n\nВсего: {len(tasks)} задач"
+                # Only show task list if it's not a single task query
+                if not (query_type in ("last_created", "first_created") and limit == 1):
+                    if formatted_list:
+                        result += f"\n\n📝 Список задач:\n" + "\n".join(formatted_list)
+                    if len(tasks) > display_limit:
+                        result += f"\n\n... и еще {len(tasks) - display_limit} задач"
+                    if len(tasks) > 1:
+                        result += f"\n\nВсего: {len(tasks)} задач"
+                else:
+                    # For single task, show details inline
+                    if formatted_list:
+                        result += f"\n\n📝 Детали:\n" + "\n".join(formatted_list)
                 
                 return result
                 

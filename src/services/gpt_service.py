@@ -4,6 +4,7 @@ GPT service for parsing commands
 
 import json
 import re
+from datetime import datetime
 from typing import Dict, Any, Optional
 from src.api.openai_client import OpenAIClient
 from src.api.ticktick_client import TickTickClient
@@ -358,7 +359,13 @@ class GPTService:
 ПОЛУЧЕННЫЕ ДАННЫЕ:
 {formatted_data}
 
-Сформируй JSON для выполнения команды, используя РЕАЛЬНЫЕ ID из полученных данных."""
+Сформируй JSON для выполнения команды, используя РЕАЛЬНЫЕ ID из полученных данных.
+
+ВАЖНО для list_tasks:
+- Если в ПОЛУЧЕННЫХ ДАННЫХ есть "ЗАДАЧИ ПО ФИЛЬТРАМ", это означает что пользователь запросил задачи на конкретную дату
+- В этом случае ОБЯЗАТЕЛЬНО используй startDate и endDate для этой даты в JSON ответе
+- Если команда содержит "на сегодня" или "сегодня", используй текущую дату ({datetime.now().strftime('%Y-%m-%d')})
+- Если команда содержит "на завтра" или "завтра", используй завтрашнюю дату"""
             
             messages = [
                 {"role": "system", "content": system_prompt},
@@ -502,6 +509,16 @@ class GPTService:
                     lines.append(f"  - '{task_id}': {json.dumps(task_data, ensure_ascii=False)}")
                 else:
                     lines.append(f"  - '{task_id}': НЕ НАЙДЕНЫ")
+            lines.append("")
+        
+        # Format tasks_by_filters (for list_tasks)
+        if fetched_data.get("tasks_by_filters"):
+            tasks = fetched_data["tasks_by_filters"]
+            lines.append(f"ЗАДАЧИ ПО ФИЛЬТРАМ (найдено {len(tasks)} задач):")
+            for task in tasks[:5]:  # Show first 5 as examples
+                lines.append(f"  - '{task.get('title', 'Без названия')}' (id: {task.get('id')}, dueDate: {task.get('dueDate', 'Не указана')})")
+            if len(tasks) > 5:
+                lines.append(f"  ... и еще {len(tasks) - 5} задач")
             lines.append("")
         
         return "\n".join(lines)

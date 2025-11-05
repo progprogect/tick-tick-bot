@@ -85,6 +85,9 @@ class ParsedCommand(BaseModel):
     period: Optional[str] = None  # For analytics: "week", "month", etc.
     start_date: Optional[str] = Field(None, alias="startDate")  # For filtering tasks
     end_date: Optional[str] = Field(None, alias="endDate")  # For filtering tasks
+    query_type: Optional[str] = Field(None, alias="queryType")  # For context: "last_created", "first_created", "all"
+    limit: Optional[int] = None  # Limit number of tasks to show
+    sort_by: Optional[str] = Field(None, alias="sortBy")  # "createdTime", "dueDate", etc.
     error: Optional[str] = None
     
     def is_composite(self) -> bool:
