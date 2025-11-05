@@ -6,6 +6,7 @@ import json
 import re
 from typing import Dict, Any, Optional
 from src.api.openai_client import OpenAIClient
+from src.api.ticktick_client import TickTickClient
 from src.services.prompt_manager import PromptManager
 from src.models.command import ParsedCommand
 from src.utils.logger import logger
@@ -14,10 +15,16 @@ from src.utils.logger import logger
 class GPTService:
     """Service for parsing commands using GPT"""
     
-    def __init__(self):
-        """Initialize GPT service"""
+    def __init__(self, ticktick_client: Optional[TickTickClient] = None):
+        """
+        Initialize GPT service
+        
+        Args:
+            ticktick_client: TickTick client for getting projects context (optional)
+        """
         self.openai_client = OpenAIClient()
         self.prompt_manager = PromptManager()
+        self.ticktick_client = ticktick_client
         self.logger = logger
     
     async def parse_command(self, command: str) -> ParsedCommand:
@@ -38,9 +45,13 @@ class GPTService:
             
             system_prompt = self.prompt_manager.get_system_prompt()
             
+            # Get context (projects only) before parsing
+            context_info = await self._get_context_for_parsing()
+            
             parsed_dict = await self.openai_client.parse_command(
                 command=command,
                 system_prompt=system_prompt,
+                context_info=context_info,
             )
             
             # Check for errors
@@ -59,6 +70,45 @@ class GPTService:
         except Exception as e:
             self.logger.error(f"Error parsing command: {e}", exc_info=True)
             raise ValueError(f"Не удалось обработать команду: {str(e)}")
+    
+    async def _get_context_for_parsing(self) -> Dict[str, Any]:
+        """
+        Get context information (projects only) for GPT parsing
+        
+        Returns:
+            Dictionary with context information (only projects, no tasks)
+        """
+        context = {
+            "projects": [],
+        }
+        
+        if not self.ticktick_client:
+            return context
+        
+        try:
+            # Get projects list only
+            projects = await self.ticktick_client.get_projects()
+            context["projects"] = [
+                {
+                    "id": p.get("id", ""),
+                    "name": p.get("name", ""),
+                }
+                for p in projects
+            ]
+            self.logger.debug(f"Retrieved {len(context['projects'])} projects for context")
+            
+        except Exception as e:
+            self.logger.warning(f"Failed to get context for parsing: {e}")
+            # Continue without context - better than failing completely
+        
+        return context
+    
+    def _get_project_name_by_id(self, projects: list, project_id: str) -> str:
+        """Get project name by ID"""
+        for project in projects:
+            if project.get("id") == project_id:
+                return project.get("name", "")
+        return ""
     
     async def determine_urgency(
         self,

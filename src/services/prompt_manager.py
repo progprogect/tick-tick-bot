@@ -35,7 +35,7 @@ class PromptManager:
   "action": "название действия",
   "title": "название задачи",
   "taskId": "ID задачи (если известен)",
-  "projectId": "ID списка (опционально)",
+  "projectId": "ID списка из доступных проектов (ОБЯЗАТЕЛЬНО использовать точный ID, не название)",
   "targetProjectId": "ID целевого списка (для переноса)",
   "dueDate": "дата в ISO 8601",
   "priority": 0-3,
@@ -121,7 +121,7 @@ class PromptManager:
       "requires_current_data": false,
       "task_identifier": {"type": "title", "value": "X"},
       "modifications": {
-        "projectId": {"value": "Работа", "modifier": "replace"}
+        "projectId": {"value": "ID_ПРОЕКТА_РАБОТА", "modifier": "replace"}
       }
     }
   ]
@@ -149,6 +149,7 @@ class PromptManager:
 - Для сложных команд (несколько операций) используй новый формат (operations)
 - Для запросов на просмотр задач используй action: "list_tasks" с startDate/endDate
 - Для оптимизации расписания на период укажи period и/или startDate/endDate
+- КРИТИЧЕСКИ ВАЖНО: При указании списка/проекта ВСЕГДА используй точный ID из списка доступных проектов, который будет предоставлен в контексте. НЕ используй название проекта, только его ID.
 - Если команда неоднозначна, верни JSON с полем "error" и сообщением."""
     
     def __init__(self):

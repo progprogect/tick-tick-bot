@@ -134,6 +134,7 @@ class OpenAIClient:
         self,
         command: str,
         system_prompt: Optional[str] = None,
+        context_info: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Parse user command using GPT
@@ -173,7 +174,17 @@ class OpenAIClient:
         current_datetime = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         date_context = f"\n\nВАЖНО: Сегодня - {current_date} ({current_datetime}). Используй эту дату для определения относительных дат (сегодня, завтра, на следующей неделе и т.д.)."
         
-        enhanced_system_prompt = system_prompt + date_context
+        # Add context information (projects only) if available
+        context_text = ""
+        if context_info and context_info.get("projects"):
+            projects_list = context_info["projects"]
+            projects_text = "\n".join([
+                f"  - {p.get('name', '')} (ID: {p.get('id', '')})"
+                for p in projects_list
+            ])
+            context_text = f"\n\nДОСТУПНЫЕ СПИСКИ ПРОЕКТОВ:\n{projects_text}\n\nКРИТИЧЕСКИ ВАЖНО - ИСПОЛЬЗОВАНИЕ PROJECT ID:\n- При создании задачи (create_task) - ВСЕГДА используй projectId из списка выше, если пользователь указывает список\n- При обновлении задачи (update_task) - если нужно изменить список задачи, используй projectId из списка выше\n- При переносе задачи (move_task) - используй targetProjectId из списка выше\n- При указании списка в команде используй ТОЧНЫЙ ID из списка выше, НЕ название\n- Например, если пользователь говорит 'в списке Работа', найди проект с названием 'Работа' в списке выше и используй его ID (не название!) в поле projectId или targetProjectId"
+        
+        enhanced_system_prompt = system_prompt + date_context + context_text
         
         messages = [
             {"role": "system", "content": enhanced_system_prompt},
