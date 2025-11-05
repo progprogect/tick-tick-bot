@@ -8,6 +8,7 @@ from typing import Dict, Any, Optional
 from src.api.openai_client import OpenAIClient
 from src.api.ticktick_client import TickTickClient
 from src.services.prompt_manager import PromptManager
+from src.services.data_fetcher import DataFetcher
 from src.models.command import ParsedCommand
 from src.utils.logger import logger
 
@@ -29,7 +30,11 @@ class GPTService:
     
     async def parse_command(self, command: str) -> ParsedCommand:
         """
-        Parse user command using GPT
+        Parse user command using multi-stage GPT process
+        
+        Stage 1: GPT determines what data is needed
+        Stage 2: System fetches data from cache/API
+        Stage 3: GPT formats JSON with real data and examples
         
         Args:
             command: User command text
@@ -41,77 +46,76 @@ class GPTService:
             ValueError: If parsing fails
         """
         try:
-            self.logger.debug(f"Parsing command: {command}")
+            self.logger.info(f"[Multi-stage] Starting command parsing: {command}")
             
-            system_prompt = self.prompt_manager.get_system_prompt()
+            # Stage 1: Determine data requirements
+            requirements = await self.determine_data_requirements(command)
+            action_type = requirements.get("action_type", "create_task")
             
-            # Get context (projects only) before parsing
-            context_info = await self._get_context_for_parsing()
+            self.logger.info(f"[Stage 2] Fetching data for requirements: {requirements}")
             
-            # Log context information for debugging
-            if context_info and context_info.get("projects"):
-                projects_count = len(context_info["projects"])
-                projects_names = [p.get("name", "") for p in context_info["projects"][:5]]
-                self.logger.debug(
-                    f"Context provided to GPT: {projects_count} projects "
-                    f"({', '.join(projects_names)}{'...' if projects_count > 5 else ''})"
-                )
-            else:
-                self.logger.warning("No projects context available for GPT parsing")
+            # Stage 2: Fetch data
+            if not self.ticktick_client:
+                raise ValueError("TickTick client not available for data fetching")
             
-            parsed_dict = await self.openai_client.parse_command(
-                command=command,
-                system_prompt=system_prompt,
-                context_info=context_info,
+            data_fetcher = DataFetcher(self.ticktick_client)
+            fetched_data = await data_fetcher.fetch_data_requirements(requirements)
+            
+            # If current_task_data is needed but not yet fetched, fetch it using task_id from tasks
+            required_data = requirements.get("required_data", {})
+            if required_data.get("current_task_data") or self._needs_current_data(action_type):
+                # Find task_ids from fetched tasks
+                for title, task in fetched_data.get("tasks", {}).items():
+                    if task and task.get("id"):
+                        task_id = task.get("id")
+                        # Fetch current task data if not already fetched
+                        if task_id not in fetched_data.get("current_task_data", {}):
+                            if "current_task_data" not in fetched_data:
+                                fetched_data["current_task_data"] = {}
+                            task_data = await data_fetcher.fetch_task_data(task_id)
+                            fetched_data["current_task_data"][task_id] = task_data
+                            self.logger.debug(f"[Stage 2] Fetched current data for task {task_id}")
+            
+            # Check for missing data
+            missing_error = self._check_missing_data(requirements, fetched_data)
+            if missing_error:
+                self.logger.warning(f"[Stage 2] Missing data: {missing_error}")
+                raise ValueError(missing_error)
+            
+            self.logger.info(f"[Stage 2] Data fetched successfully")
+            
+            # Stage 3: Parse command with data
+            parsed_command = await self.parse_command_with_data(
+                command, fetched_data, action_type
             )
             
-            # Log what GPT returned, especially projectId and targetProjectId
-            if "projectId" in parsed_dict:
-                project_id_value = parsed_dict["projectId"]
-                self.logger.debug(f"GPT returned projectId: '{project_id_value}'")
-                # Check if it's a placeholder
-                if "ID_ПРОЕКТА" in project_id_value or "_ИЗ_КОНТЕКСТА" in project_id_value:
-                    self.logger.warning(
-                        f"⚠ GPT returned placeholder for projectId: '{project_id_value}'. "
-                        f"This will be handled by _resolve_project_id, but GPT should use real IDs."
-                    )
-            else:
-                self.logger.debug("GPT did not return projectId")
-            
-            if "targetProjectId" in parsed_dict:
-                target_project_id_value = parsed_dict["targetProjectId"]
-                self.logger.debug(f"GPT returned targetProjectId: '{target_project_id_value}'")
-                # Check if it's a placeholder
-                if "ID_ПРОЕКТА" in target_project_id_value or "_ИЗ_КОНТЕКСТА" in target_project_id_value:
-                    self.logger.warning(
-                        f"⚠ GPT returned placeholder for targetProjectId: '{target_project_id_value}'. "
-                        f"This will be handled by _resolve_project_id, but GPT should use real IDs."
-                    )
-            else:
-                self.logger.debug("GPT did not return targetProjectId")
-            
-            # Check for errors
-            if "error" in parsed_dict:
-                error_msg = parsed_dict["error"]
-                self.logger.warning(f"GPT returned error: {error_msg}")
-                raise ValueError(error_msg)
-            
-            # Create ParsedCommand object
-            parsed_command = ParsedCommand(**parsed_dict)
-            
-            # Log parsed command details, especially project_id and target_project_id
-            self.logger.debug(
-                f"Parsed command: action='{parsed_command.action}', "
-                f"title='{parsed_command.title}', "
-                f"project_id='{parsed_command.project_id}', "
-                f"target_project_id='{parsed_command.target_project_id}'"
-            )
+            self.logger.info(f"[Multi-stage] Command parsing completed successfully")
             
             return parsed_command
             
+        except ValueError:
+            # Re-raise ValueError as-is (these are user-friendly error messages)
+            raise
         except Exception as e:
-            self.logger.error(f"Error parsing command: {e}", exc_info=True)
+            self.logger.error(f"[Multi-stage] Error parsing command: {e}", exc_info=True)
             raise ValueError(f"Не удалось обработать команду: {str(e)}")
+    
+    def _needs_current_data(self, action_type: str) -> bool:
+        """
+        Check if action type needs current task data (for merge/append operations)
+        
+        Args:
+            action_type: Action type
+            
+        Returns:
+            True if current data is needed
+        """
+        actions_needing_current_data = [
+            "add_tags",  # Need to merge with existing tags
+            "add_note",  # Need to append to existing notes
+            "update_task",  # May need current data for merge operations
+        ]
+        return action_type in actions_needing_current_data
     
     async def _get_context_for_parsing(self) -> Dict[str, Any]:
         """
@@ -234,3 +238,278 @@ class GPTService:
                 f"Due: {task.get('dueDate', 'Не указана')})"
             )
         return "\n".join(formatted)
+    
+    async def determine_data_requirements(self, command: str) -> Dict[str, Any]:
+        """
+        Stage 1: Determine what data is needed for command execution
+        
+        Args:
+            command: User command text
+            
+        Returns:
+            Dictionary with action_type and required_data
+            
+        Raises:
+            ValueError: If GPT cannot determine requirements
+        """
+        try:
+            self.logger.info(f"[Stage 1] Determining data requirements for command: {command}")
+            
+            system_prompt = self.prompt_manager.get_stage1_prompt()
+            
+            messages = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": command},
+            ]
+            
+            response = await self.openai_client.chat_completion(messages=messages)
+            
+            # Parse JSON from response
+            json_match = re.search(r'\{.*\}', response, re.DOTALL)
+            if json_match:
+                json_str = json_match.group(0)
+            else:
+                json_str = response.strip()
+            
+            # Clean up JSON string
+            json_str = json_str.strip()
+            if json_str.startswith('```json'):
+                json_str = json_str[7:]
+            if json_str.startswith('```'):
+                json_str = json_str[3:]
+            if json_str.endswith('```'):
+                json_str = json_str[:-3]
+            json_str = json_str.strip()
+            
+            try:
+                requirements = json.loads(json_str)
+                self.logger.info(f"[Stage 1] Requirements determined: {requirements}")
+                return requirements
+            except json.JSONDecodeError as e:
+                self.logger.error(f"[Stage 1] Failed to parse JSON: {json_str}")
+                raise ValueError(f"Не удалось определить требования к данным: {e}")
+                
+        except Exception as e:
+            self.logger.error(f"[Stage 1] Error determining data requirements: {e}", exc_info=True)
+            raise ValueError(f"Не удалось обработать команду: {str(e)}")
+    
+    async def parse_command_with_data(
+        self, 
+        command: str, 
+        fetched_data: Dict[str, Any], 
+        action_type: str
+    ) -> ParsedCommand:
+        """
+        Stage 3: Parse command with fetched data and examples
+        
+        Args:
+            command: Original user command
+            fetched_data: Data fetched in stage 2
+            action_type: Type of action determined in stage 1
+            
+        Returns:
+            ParsedCommand object
+            
+        Raises:
+            ValueError: If parsing fails
+        """
+        try:
+            self.logger.info(f"[Stage 3] Parsing command with data for action: {action_type}")
+            
+            # Format fetched data for GPT
+            formatted_data = self._format_fetched_data_for_gpt(fetched_data)
+            
+            # Prepare example data for prompt
+            example_data = self._prepare_example_data(fetched_data, action_type)
+            
+            # Get stage 3 prompt with examples
+            system_prompt = self.prompt_manager.get_stage3_prompt(action_type, example_data)
+            
+            # Build user message with command and data
+            user_message = f"""ИСХОДНАЯ КОМАНДА ПОЛЬЗОВАТЕЛЯ:
+{command}
+
+ПОЛУЧЕННЫЕ ДАННЫЕ:
+{formatted_data}
+
+Сформируй JSON для выполнения команды, используя РЕАЛЬНЫЕ ID из полученных данных."""
+            
+            messages = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_message},
+            ]
+            
+            response = await self.openai_client.chat_completion(messages=messages)
+            
+            # Parse JSON from response
+            json_match = re.search(r'\{.*\}', response, re.DOTALL)
+            if json_match:
+                json_str = json_match.group(0)
+            else:
+                json_str = response.strip()
+            
+            # Clean up JSON string
+            json_str = json_str.strip()
+            if json_str.startswith('```json'):
+                json_str = json_str[7:]
+            if json_str.startswith('```'):
+                json_str = json_str[3:]
+            if json_str.endswith('```'):
+                json_str = json_str[:-3]
+            json_str = json_str.strip()
+            
+            try:
+                parsed_dict = json.loads(json_str)
+                
+                # Check for errors
+                if "error" in parsed_dict:
+                    error_msg = parsed_dict["error"]
+                    self.logger.warning(f"[Stage 3] GPT returned error: {error_msg}")
+                    raise ValueError(error_msg)
+                
+                # Create ParsedCommand object
+                parsed_command = ParsedCommand(**parsed_dict)
+                
+                self.logger.info(
+                    f"[Stage 3] Command parsed: action='{parsed_command.action}', "
+                    f"task_id='{parsed_command.task_id}', project_id='{parsed_command.project_id}'"
+                )
+                
+                return parsed_command
+                
+            except json.JSONDecodeError as e:
+                self.logger.error(f"[Stage 3] Failed to parse JSON: {json_str}")
+                raise ValueError(f"Не удалось распарсить ответ GPT: {e}")
+                
+        except Exception as e:
+            self.logger.error(f"[Stage 3] Error parsing command with data: {e}", exc_info=True)
+            raise ValueError(f"Не удалось обработать команду: {str(e)}")
+    
+    def _check_missing_data(
+        self, 
+        requirements: Dict[str, Any], 
+        fetched_data: Dict[str, Any]
+    ) -> Optional[str]:
+        """
+        Check if any required data is missing
+        
+        Args:
+            requirements: Requirements from stage 1
+            fetched_data: Fetched data from stage 2
+            
+        Returns:
+            Error message if data is missing, None otherwise
+        """
+        required_data = requirements.get("required_data", {})
+        missing = []
+        
+        # Check tasks by title
+        task_titles = required_data.get("task_by_title", [])
+        for title in task_titles:
+            if title not in fetched_data.get("tasks", {}) or fetched_data["tasks"][title] is None:
+                missing.append(f"Задача '{title}'")
+        
+        # Check projects by name
+        project_names = required_data.get("project_by_name", [])
+        for name in project_names:
+            if name not in fetched_data.get("projects", {}) or fetched_data["projects"][name] is None:
+                missing.append(f"Проект '{name}'")
+        
+        # Check task data
+        task_ids = required_data.get("task_data", [])
+        for task_id in task_ids:
+            if task_id not in fetched_data.get("task_data", {}) or fetched_data["task_data"][task_id] is None:
+                missing.append(f"Данные задачи '{task_id}'")
+        
+        if missing:
+            return f"Не найдено: {', '.join(missing)}. Попробуйте создать новую задачу или укажите правильное название."
+        
+        return None
+    
+    def _format_fetched_data_for_gpt(self, fetched_data: Dict[str, Any]) -> str:
+        """
+        Format fetched data for GPT prompt
+        
+        Args:
+            fetched_data: Fetched data dictionary
+            
+        Returns:
+            Formatted string for GPT
+        """
+        lines = []
+        
+        # Format tasks
+        if fetched_data.get("tasks"):
+            lines.append("НАЙДЕННЫЕ ЗАДАЧИ:")
+            for title, task in fetched_data["tasks"].items():
+                if task:
+                    lines.append(f"  - '{title}': {{id: '{task.get('id')}', projectId: '{task.get('projectId')}', title: '{task.get('title')}'}}")
+                else:
+                    lines.append(f"  - '{title}': НЕ НАЙДЕНА")
+            lines.append("")
+        
+        # Format projects
+        if fetched_data.get("projects"):
+            lines.append("НАЙДЕННЫЕ ПРОЕКТЫ:")
+            for name, project in fetched_data["projects"].items():
+                if project:
+                    lines.append(f"  - '{name}': {{id: '{project.get('id')}', name: '{project.get('name')}'}}")
+                else:
+                    lines.append(f"  - '{name}': НЕ НАЙДЕН")
+            lines.append("")
+        
+        # Format task data
+        if fetched_data.get("task_data"):
+            lines.append("ДАННЫЕ ЗАДАЧ:")
+            for task_id, task_data in fetched_data["task_data"].items():
+                if task_data:
+                    lines.append(f"  - '{task_id}': {json.dumps(task_data, ensure_ascii=False)}")
+                else:
+                    lines.append(f"  - '{task_id}': НЕ НАЙДЕНЫ")
+            lines.append("")
+        
+        # Format current task data
+        if fetched_data.get("current_task_data"):
+            lines.append("ТЕКУЩИЕ ДАННЫЕ ЗАДАЧ (для merge/append операций):")
+            for task_id, task_data in fetched_data["current_task_data"].items():
+                if task_data:
+                    lines.append(f"  - '{task_id}': {json.dumps(task_data, ensure_ascii=False)}")
+                else:
+                    lines.append(f"  - '{task_id}': НЕ НАЙДЕНЫ")
+            lines.append("")
+        
+        return "\n".join(lines)
+    
+    def _prepare_example_data(
+        self, 
+        fetched_data: Dict[str, Any], 
+        action_type: str
+    ) -> Dict[str, Any]:
+        """
+        Prepare example data structure for prompt
+        
+        Args:
+            fetched_data: Fetched data
+            action_type: Action type
+            
+        Returns:
+            Example data dictionary
+        """
+        example = {}
+        
+        # Try to get first task
+        if fetched_data.get("tasks"):
+            first_task_title = list(fetched_data["tasks"].keys())[0]
+            first_task = fetched_data["tasks"][first_task_title]
+            if first_task:
+                example["task_id"] = first_task.get("id", "task_123")
+                example["project_id"] = first_task.get("projectId", "inbox123456")
+        
+        # Try to get first project
+        if fetched_data.get("projects"):
+            first_project_name = list(fetched_data["projects"].keys())[0]
+            first_project = fetched_data["projects"][first_project_name]
+            if first_project and "project_id" not in example:
+                example["project_id"] = first_project.get("id", "inbox123456")
+        
+        return example
