@@ -65,11 +65,30 @@ class GPTService:
                 context_info=context_info,
             )
             
-            # Log what GPT returned, especially projectId
+            # Log what GPT returned, especially projectId and targetProjectId
             if "projectId" in parsed_dict:
-                self.logger.debug(f"GPT returned projectId: '{parsed_dict['projectId']}'")
+                project_id_value = parsed_dict["projectId"]
+                self.logger.debug(f"GPT returned projectId: '{project_id_value}'")
+                # Check if it's a placeholder
+                if "ID_ПРОЕКТА" in project_id_value or "_ИЗ_КОНТЕКСТА" in project_id_value:
+                    self.logger.warning(
+                        f"⚠ GPT returned placeholder for projectId: '{project_id_value}'. "
+                        f"This will be handled by _resolve_project_id, but GPT should use real IDs."
+                    )
             else:
                 self.logger.debug("GPT did not return projectId")
+            
+            if "targetProjectId" in parsed_dict:
+                target_project_id_value = parsed_dict["targetProjectId"]
+                self.logger.debug(f"GPT returned targetProjectId: '{target_project_id_value}'")
+                # Check if it's a placeholder
+                if "ID_ПРОЕКТА" in target_project_id_value or "_ИЗ_КОНТЕКСТА" in target_project_id_value:
+                    self.logger.warning(
+                        f"⚠ GPT returned placeholder for targetProjectId: '{target_project_id_value}'. "
+                        f"This will be handled by _resolve_project_id, but GPT should use real IDs."
+                    )
+            else:
+                self.logger.debug("GPT did not return targetProjectId")
             
             # Check for errors
             if "error" in parsed_dict:
@@ -80,11 +99,12 @@ class GPTService:
             # Create ParsedCommand object
             parsed_command = ParsedCommand(**parsed_dict)
             
-            # Log parsed command details, especially project_id
+            # Log parsed command details, especially project_id and target_project_id
             self.logger.debug(
                 f"Parsed command: action='{parsed_command.action}', "
                 f"title='{parsed_command.title}', "
-                f"project_id='{parsed_command.project_id}'"
+                f"project_id='{parsed_command.project_id}', "
+                f"target_project_id='{parsed_command.target_project_id}'"
             )
             
             return parsed_command

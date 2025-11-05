@@ -2,6 +2,7 @@
 Task management service
 """
 
+import re
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta
 from src.api.ticktick_client import TickTickClient
@@ -50,6 +51,28 @@ class TaskManager:
             return None
         
         self.logger.debug(f"Resolving project identifier: '{project_identifier}'")
+        
+        # Check if GPT returned a placeholder instead of real ID
+        # Common placeholders: "ID_ПРОЕКТА_РАБОТА_ИЗ_КОНТЕКСТА", "ID_ПРОЕКТА_ЛИЧНОЕ_ИЗ_КОНТЕКСТА", etc.
+        placeholder_patterns = [
+            r"ID_ПРОЕКТА_(\w+)_ИЗ_КОНТЕКСТА",
+            r"ID_ПРОЕКТА_(\w+)",
+            r"ID_(\w+)_ИЗ_КОНТЕКСТА",
+        ]
+        
+        for pattern in placeholder_patterns:
+            match = re.search(pattern, project_identifier, re.IGNORECASE)
+            if match:
+                # Extract project name from placeholder
+                extracted_name = match.group(1)
+                self.logger.warning(
+                    f"⚠ GPT returned placeholder '{project_identifier}'. "
+                    f"Extracted project name: '{extracted_name}'. "
+                    f"Attempting to resolve by name..."
+                )
+                # Try to resolve by extracted name
+                project_identifier = extracted_name
+                break
         
         # Check if it looks like an ID (starts with "inbox" or is UUID-like)
         # If it's already an ID, return as is
@@ -458,19 +481,41 @@ class TaskManager:
             if not command.target_project_id:
                 raise ValueError("Целевой список не указан")
             
+            self.logger.debug(
+                f"Moving task: task_id='{command.task_id}', "
+                f"target_project_id from command='{command.target_project_id}'"
+            )
+            
             # Resolve target project_id (name or ID)
+            original_target_project_id = command.target_project_id
             target_project_id = await self._resolve_project_id(command.target_project_id)
-            if not target_project_id:
-                raise ValueError(f"Список '{command.target_project_id}' не найден. Проверьте правильность названия или создайте список сначала.")
+            
+            # Log project resolution result
+            if target_project_id:
+                self.logger.info(f"✓ Target project resolved: '{original_target_project_id}' -> '{target_project_id}'")
+            else:
+                self.logger.error(
+                    f"✗ Failed to resolve target project: '{original_target_project_id}'. "
+                    f"This might be a placeholder returned by GPT instead of real ID."
+                )
+                raise ValueError(f"Список '{original_target_project_id}' не найден. Проверьте правильность названия или создайте список сначала.")
             
             # Verify target project exists
             try:
                 projects = await self.client.get_projects()
                 target_project = next((p for p in projects if p.get('id') == target_project_id), None)
                 if not target_project:
+                    self.logger.error(
+                        f"✗ Target project ID '{target_project_id}' not found in projects list. "
+                        f"Available projects: {[p.get('name', '') for p in projects[:5]]}"
+                    )
                     raise ValueError(f"Целевой список '{target_project_id}' не найден. Проверьте правильность ID или создайте список сначала.")
                 self.logger.debug(f"Target project verified: {target_project.get('name', target_project_id)}")
+            except ValueError:
+                # Re-raise ValueError as-is
+                raise
             except Exception as verify_error:
+                self.logger.error(f"Error verifying target project: {verify_error}", exc_info=True)
                 raise ValueError(f"Не удалось проверить существование целевого списка: {verify_error}")
             
             # Get current task data
