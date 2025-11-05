@@ -71,6 +71,21 @@ class TestBot:
     async def handle_command(self, command: str) -> str:
         """Handle test command"""
         try:
+            # Ensure client is initialized
+            if not self.ticktick_client:
+                self.logger.error("[TestBot] TickTick client is None in handle_command!")
+                raise ValueError("TickTick client не инициализирован")
+            
+            # Ensure client is authenticated
+            if not hasattr(self.ticktick_client, 'access_token') or not self.ticktick_client.access_token:
+                self.logger.info("[TestBot] Authenticating TickTick client...")
+                await self.ticktick_client.authenticate()
+            
+            # Ensure GPT service has client
+            if not self.gpt_service.ticktick_client:
+                self.logger.warning("[TestBot] GPT service lost ticktick_client reference, re-assigning...")
+                self.gpt_service.ticktick_client = self.ticktick_client
+            
             processed_text = self.text_handler.process(command)
             
             if not self.text_handler.validate(processed_text):
@@ -183,8 +198,29 @@ test_bot = TestBot()
 @app.on_event("startup")
 async def startup():
     """Initialize on startup"""
-    await test_bot.initialize()
-    logger.info("Test bot initialized")
+    try:
+        logger.info("[Startup] Initializing TestBot...")
+        await test_bot.initialize()
+        
+        # Verify client is set
+        if test_bot.ticktick_client:
+            logger.info(f"[Startup] TickTick client initialized: {type(test_bot.ticktick_client).__name__}")
+        else:
+            logger.error("[Startup] TickTick client is None after initialization!")
+        
+        # Verify GPT service has client
+        if test_bot.gpt_service.ticktick_client:
+            logger.info("[Startup] GPT service has TickTick client reference")
+        else:
+            logger.error("[Startup] GPT service does not have TickTick client reference!")
+            # Re-assign if lost
+            test_bot.gpt_service.ticktick_client = test_bot.ticktick_client
+            logger.info("[Startup] Re-assigned TickTick client to GPT service")
+        
+        logger.info("Test bot initialized successfully")
+    except Exception as e:
+        logger.error(f"[Startup] Error initializing bot: {e}", exc_info=True)
+        raise
 
 
 @app.get("/", response_class=HTMLResponse)

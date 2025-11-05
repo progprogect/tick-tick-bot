@@ -5,7 +5,7 @@ Telegram Bot API client
 from typing import Optional, Callable, Awaitable
 from telegram import Update, Bot, Voice
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
-from telegram.error import TelegramError
+from telegram.error import TelegramError, Conflict
 from src.config.settings import settings
 from src.utils.logger import logger
 
@@ -229,10 +229,27 @@ class TelegramClient:
         """Start the bot"""
         self.setup_handlers()
         self.logger.info("Starting Telegram bot...")
-        await self.application.initialize()
-        await self.application.start()
-        await self.application.updater.start_polling()
-        self.logger.info("Telegram bot started and polling")
+        try:
+            await self.application.initialize()
+            await self.application.start()
+            
+            # Try to start polling, handle Conflict if another instance is running
+            try:
+                await self.application.updater.start_polling(
+                    drop_pending_updates=True,  # Drop pending updates to avoid conflicts
+                    allowed_updates=["message", "callback_query"]
+                )
+                self.logger.info("Telegram bot started and polling")
+            except Conflict as e:
+                self.logger.warning(
+                    f"Telegram bot conflict detected: {e}. "
+                    "Another bot instance may be running. Continuing anyway..."
+                )
+                # Don't raise - allow bot to continue (for web interface compatibility)
+                self.logger.info("Telegram bot initialized (polling conflict ignored)")
+        except Exception as e:
+            self.logger.error(f"Error starting Telegram bot: {e}", exc_info=True)
+            raise
     
     async def stop(self):
         """Stop the bot"""
