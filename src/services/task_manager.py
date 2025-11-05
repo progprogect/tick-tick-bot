@@ -5,6 +5,24 @@ Task management service
 import re
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta
+
+def _clean_project_name(name: str) -> str:
+    """Remove emojis and extra spaces from project name for matching"""
+    if not name:
+        return ""
+    # Remove emojis (Unicode ranges for emojis)
+    emoji_pattern = re.compile(
+        "["
+        "\U0001F600-\U0001F64F"  # emoticons
+        "\U0001F300-\U0001F5FF"  # symbols & pictographs
+        "\U0001F680-\U0001F6FF"  # transport & map symbols
+        "\U0001F1E0-\U0001F1FF"  # flags (iOS)
+        "\U00002702-\U000027B0"
+        "\U000024C2-\U0001F251"
+        "]+", flags=re.UNICODE
+    )
+    cleaned = emoji_pattern.sub('', name).strip()
+    return cleaned
 from src.api.ticktick_client import TickTickClient
 from src.models.task import Task, TaskCreate, TaskUpdate
 from src.models.command import ParsedCommand
@@ -87,7 +105,7 @@ class TaskManager:
             
             project_identifier_lower = project_identifier.lower().strip()
             
-            # First, try exact match (case-insensitive)
+            # First, try exact match (case-insensitive, emoji-insensitive)
             for project in projects:
                 project_name = project.get('name', '').strip()
                 project_id = project.get('id')
@@ -95,7 +113,10 @@ class TaskManager:
                 if not project_name or not project_id:
                     continue
                 
-                if project_name.lower() == project_identifier_lower:
+                # Clean project name (remove emojis) for matching
+                cleaned_project_name = _clean_project_name(project_name).lower()
+                
+                if cleaned_project_name == project_identifier_lower:
                     self.logger.info(f"✓ Exact match found: project '{project_name}' (ID: {project_id})")
                     return project_id
             
@@ -110,9 +131,11 @@ class TaskManager:
                 if not project_name or not project_id:
                     continue
                 
-                project_name_lower = project_name.lower()
+                # Clean project name (remove emojis) for matching
+                cleaned_project_name = _clean_project_name(project_name).lower()
+                project_name_lower = cleaned_project_name
                 
-                # Check if project name contains identifier or vice versa
+                # Check if cleaned project name contains identifier or vice versa
                 if (project_identifier_lower in project_name_lower or 
                     project_name_lower in project_identifier_lower):
                     matches.append((project_name, project_id))

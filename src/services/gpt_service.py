@@ -131,13 +131,36 @@ class GPTService:
         try:
             # Get projects list only
             projects = await self.ticktick_client.get_projects()
-            context["projects"] = [
-                {
+            
+            # Helper function to remove emojis and normalize name
+            import re
+            def clean_name(name: str) -> str:
+                """Remove emojis and extra spaces from project name"""
+                if not name:
+                    return ""
+                # Remove emojis (Unicode ranges for emojis)
+                emoji_pattern = re.compile(
+                    "["
+                    "\U0001F600-\U0001F64F"  # emoticons
+                    "\U0001F300-\U0001F5FF"  # symbols & pictographs
+                    "\U0001F680-\U0001F6FF"  # transport & map symbols
+                    "\U0001F1E0-\U0001F1FF"  # flags (iOS)
+                    "\U00002702-\U000027B0"
+                    "\U000024C2-\U0001F251"
+                    "]+", flags=re.UNICODE
+                )
+                cleaned = emoji_pattern.sub('', name).strip()
+                return cleaned
+            
+            context["projects"] = []
+            for p in projects:
+                original_name = p.get("name", "")
+                cleaned_name = clean_name(original_name)
+                context["projects"].append({
                     "id": p.get("id", ""),
-                    "name": p.get("name", ""),
-                }
-                for p in projects
-            ]
+                    "name": original_name,  # Keep original for display
+                    "name_clean": cleaned_name,  # Clean name for matching
+                })
             
             self.logger.debug(f"Retrieved {len(context['projects'])} projects for context")
             
