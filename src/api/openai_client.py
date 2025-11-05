@@ -4,6 +4,7 @@ OpenAI API client
 
 import json
 import re
+from datetime import datetime
 from typing import Optional, Dict, Any, List
 from openai import AsyncOpenAI
 from src.config.settings import settings
@@ -167,8 +168,15 @@ class OpenAIClient:
                 "Если команда неоднозначна, верни JSON с полем 'error' и сообщением."
             )
         
+        # Add current date to system prompt
+        current_date = datetime.now().strftime("%Y-%m-%d")
+        current_datetime = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        date_context = f"\n\nВАЖНО: Сегодня - {current_date} ({current_datetime}). Используй эту дату для определения относительных дат (сегодня, завтра, на следующей неделе и т.д.)."
+        
+        enhanced_system_prompt = system_prompt + date_context
+        
         messages = [
-            {"role": "system", "content": system_prompt},
+            {"role": "system", "content": enhanced_system_prompt},
             {"role": "user", "content": command},
         ]
         
