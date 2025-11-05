@@ -262,27 +262,65 @@ class SmartRouter:
             Result message
         """
         if group.type == ActionType.UPDATE_TASK:
-            # Merge all update_task operations into one
+            # Handle update_task - can be single task (merged) or multiple tasks
             return await self._execute_unified_update(group, context)
         elif group.type == ActionType.CREATE_TASK:
-            return await self._execute_create_task(group.operations[0], context)
+            # Execute all create operations
+            results = []
+            for operation in group.operations:
+                result = await self._execute_create_task(operation, context)
+                results.append(result)
+            return self._combine_results(results)
         elif group.type == ActionType.DELETE_TASK:
-            return await self._execute_delete_task(group.operations[0], context)
+            # Execute all delete operations
+            results = []
+            for operation in group.operations:
+                result = await self._execute_delete_task(operation, context)
+                results.append(result)
+            return self._combine_results(results)
         elif group.type == ActionType.MOVE_TASK:
-            return await self._execute_move_task(group.operations[0], context)
+            # Execute all move operations
+            results = []
+            for operation in group.operations:
+                result = await self._execute_move_task(operation, context)
+                results.append(result)
+            return self._combine_results(results)
         elif group.type == ActionType.BULK_MOVE:
+            # Bulk operations are single by nature
             return await self._execute_bulk_move(group.operations[0], context)
         elif group.type == ActionType.ADD_TAGS:
-            return await self._execute_add_tags(group.operations[0], context)
+            # Execute all add_tags operations
+            results = []
+            for operation in group.operations:
+                result = await self._execute_add_tags(operation, context)
+                results.append(result)
+            return self._combine_results(results)
         elif group.type == ActionType.ADD_NOTE:
-            return await self._execute_add_note(group.operations[0], context)
+            # Execute all add_note operations
+            results = []
+            for operation in group.operations:
+                result = await self._execute_add_note(operation, context)
+                results.append(result)
+            return self._combine_results(results)
         elif group.type == ActionType.CREATE_RECURRING_TASK:
-            return await self._execute_create_recurring_task(group.operations[0], context)
+            # Execute all create_recurring_task operations
+            results = []
+            for operation in group.operations:
+                result = await self._execute_create_recurring_task(operation, context)
+                results.append(result)
+            return self._combine_results(results)
         elif group.type == ActionType.SET_REMINDER:
-            return await self._execute_set_reminder(group.operations[0], context)
+            # Execute all set_reminder operations
+            results = []
+            for operation in group.operations:
+                result = await self._execute_set_reminder(operation, context)
+                results.append(result)
+            return self._combine_results(results)
         elif group.type == ActionType.GET_ANALYTICS:
+            # Analytics operations are single by nature
             return await self._execute_get_analytics(group.operations[0], context)
         elif group.type == ActionType.OPTIMIZE_SCHEDULE:
+            # Optimize schedule operations are single by nature
             return await self._execute_optimize_schedule(group.operations[0], context)
         else:
             raise ValueError(f"Unknown operation type: {group.type}")
@@ -293,7 +331,8 @@ class SmartRouter:
         context: Dict[str, Any],
     ) -> str:
         """
-        Execute unified update_task - merge all modifications into one API call
+        Execute unified update_task - merge all modifications into one API call for single task,
+        or execute separately for multiple different tasks
         
         Args:
             group: OperationGroup with update_task operations
@@ -302,31 +341,90 @@ class SmartRouter:
         Returns:
             Result message
         """
-        # Get task_id from first operation
-        first_op = group.operations[0]
-        task_id = context.get('task_id')
-        if not task_id and first_op.task_identifier:
-            task_id = context.get(f'operation_{id(first_op)}_task_id')
+        # Collect all task_ids from operations
+        task_ids = set()
+        operations_by_task = {}  # task_id -> list of operations
         
-        if not task_id:
-            raise ValueError("Task ID not found for update operation")
-        
-        # Merge all modifications from all operations
-        all_modifications = {}
         for operation in group.operations:
-            if operation.modifications:
-                all_modifications.update(operation.modifications)
+            # Resolve task_id for this operation
+            task_id = None
+            if operation.task_identifier:
+                task_id = context.get(f'operation_{id(operation)}_task_id')
+                if not task_id:
+                    # Try to resolve it now
+                    try:
+                        task_id = await self._resolve_task_identifier(operation.task_identifier)
+                        context[f'operation_{id(operation)}_task_id'] = task_id
+                    except Exception as e:
+                        self.logger.warning(f"Failed to resolve task identifier for operation: {e}")
+                        continue
+            
+            if not task_id:
+                # Fallback to common task_id
+                task_id = context.get('task_id')
+            
+            if not task_id:
+                raise ValueError(f"Task ID not found for update operation: {operation.task_identifier}")
+            
+            task_ids.add(task_id)
+            
+            # Group operations by task_id
+            if task_id not in operations_by_task:
+                operations_by_task[task_id] = []
+            operations_by_task[task_id].append(operation)
         
-        if not all_modifications:
-            raise ValueError("No modifications in update operations")
+        if not task_ids:
+            raise ValueError("No valid task IDs found for update operations")
         
-        # Use TaskModifier to apply all modifications
-        task_identifier = first_op.task_identifier.value if first_op.task_identifier else None
-        return await self.task_modifier.modify_task(
-            task_id=task_id,
-            modifications=all_modifications,
-            task_identifier=task_identifier,
-        )
+        # If all operations are for the same task, merge modifications
+        if len(task_ids) == 1:
+            task_id = list(task_ids)[0]
+            operations = operations_by_task[task_id]
+            
+            # Merge all modifications from all operations
+            all_modifications = {}
+            for operation in operations:
+                if operation.modifications:
+                    all_modifications.update(operation.modifications)
+            
+            if not all_modifications:
+                raise ValueError("No modifications in update operations")
+            
+            # Use TaskModifier to apply all modifications
+            first_op = operations[0]
+            task_identifier = first_op.task_identifier.value if first_op.task_identifier else None
+            return await self.task_modifier.modify_task(
+                task_id=task_id,
+                modifications=all_modifications,
+                task_identifier=task_identifier,
+            )
+        else:
+            # Multiple different tasks - execute each separately
+            results = []
+            for task_id, operations in operations_by_task.items():
+                # Merge modifications for this specific task
+                task_modifications = {}
+                for operation in operations:
+                    if operation.modifications:
+                        task_modifications.update(operation.modifications)
+                
+                if not task_modifications:
+                    continue
+                
+                # Execute update for this task
+                first_op = operations[0]
+                task_identifier = first_op.task_identifier.value if first_op.task_identifier else None
+                result = await self.task_modifier.modify_task(
+                    task_id=task_id,
+                    modifications=task_modifications,
+                    task_identifier=task_identifier,
+                )
+                results.append(result)
+            
+            if not results:
+                raise ValueError("No valid update operations executed")
+            
+            return self._combine_results(results)
     
     async def _execute_create_task(
         self,
@@ -364,9 +462,21 @@ class SmartRouter:
         context: Dict[str, Any],
     ) -> str:
         """Execute delete_task operation"""
-        task_id = context.get('task_id')
-        if not task_id and operation.task_identifier:
+        # Prefer operation-specific task_id for multiple operations support
+        task_id = None
+        if operation.task_identifier:
             task_id = context.get(f'operation_{id(operation)}_task_id')
+            if not task_id:
+                # Try to resolve it now
+                try:
+                    task_id = await self._resolve_task_identifier(operation.task_identifier)
+                    context[f'operation_{id(operation)}_task_id'] = task_id
+                except Exception as e:
+                    self.logger.warning(f"Failed to resolve task identifier for delete: {e}")
+        
+        # Fallback to common task_id
+        if not task_id:
+            task_id = context.get('task_id')
         
         if not task_id:
             raise ValueError("Task ID not found for delete operation")
@@ -385,9 +495,21 @@ class SmartRouter:
         context: Dict[str, Any],
     ) -> str:
         """Execute move_task operation"""
-        task_id = context.get('task_id')
-        if not task_id and operation.task_identifier:
+        # Prefer operation-specific task_id for multiple operations support
+        task_id = None
+        if operation.task_identifier:
             task_id = context.get(f'operation_{id(operation)}_task_id')
+            if not task_id:
+                # Try to resolve it now
+                try:
+                    task_id = await self._resolve_task_identifier(operation.task_identifier)
+                    context[f'operation_{id(operation)}_task_id'] = task_id
+                except Exception as e:
+                    self.logger.warning(f"Failed to resolve task identifier for move: {e}")
+        
+        # Fallback to common task_id
+        if not task_id:
+            task_id = context.get('task_id')
         
         if not task_id:
             raise ValueError("Task ID not found for move operation")
@@ -433,9 +555,21 @@ class SmartRouter:
         context: Dict[str, Any],
     ) -> str:
         """Execute add_tags operation"""
-        task_id = context.get('task_id')
-        if not task_id and operation.task_identifier:
+        # Prefer operation-specific task_id for multiple operations support
+        task_id = None
+        if operation.task_identifier:
             task_id = context.get(f'operation_{id(operation)}_task_id')
+            if not task_id:
+                # Try to resolve it now
+                try:
+                    task_id = await self._resolve_task_identifier(operation.task_identifier)
+                    context[f'operation_{id(operation)}_task_id'] = task_id
+                except Exception as e:
+                    self.logger.warning(f"Failed to resolve task identifier for add_tags: {e}")
+        
+        # Fallback to common task_id
+        if not task_id:
+            task_id = context.get('task_id')
         
         if not task_id:
             raise ValueError("Task ID not found for add_tags operation")
@@ -459,9 +593,21 @@ class SmartRouter:
         context: Dict[str, Any],
     ) -> str:
         """Execute add_note operation"""
-        task_id = context.get('task_id')
-        if not task_id and operation.task_identifier:
+        # Prefer operation-specific task_id for multiple operations support
+        task_id = None
+        if operation.task_identifier:
             task_id = context.get(f'operation_{id(operation)}_task_id')
+            if not task_id:
+                # Try to resolve it now
+                try:
+                    task_id = await self._resolve_task_identifier(operation.task_identifier)
+                    context[f'operation_{id(operation)}_task_id'] = task_id
+                except Exception as e:
+                    self.logger.warning(f"Failed to resolve task identifier for add_note: {e}")
+        
+        # Fallback to common task_id
+        if not task_id:
+            task_id = context.get('task_id')
         
         if not task_id:
             raise ValueError("Task ID not found for add_note operation")
@@ -512,9 +658,21 @@ class SmartRouter:
         context: Dict[str, Any],
     ) -> str:
         """Execute set_reminder operation"""
-        task_id = context.get('task_id')
-        if not task_id and operation.task_identifier:
+        # Prefer operation-specific task_id for multiple operations support
+        task_id = None
+        if operation.task_identifier:
             task_id = context.get(f'operation_{id(operation)}_task_id')
+            if not task_id:
+                # Try to resolve it now
+                try:
+                    task_id = await self._resolve_task_identifier(operation.task_identifier)
+                    context[f'operation_{id(operation)}_task_id'] = task_id
+                except Exception as e:
+                    self.logger.warning(f"Failed to resolve task identifier for set_reminder: {e}")
+        
+        # Fallback to common task_id
+        if not task_id:
+            task_id = context.get('task_id')
         
         if not task_id:
             raise ValueError("Task ID not found for set_reminder operation")
@@ -577,5 +735,13 @@ class SmartRouter:
         if len(results) == 1:
             return results[0]
         
-        return f"✓ Выполнено {len(results)} операций:\n" + "\n".join(f"  • {r}" for r in results)
+        # Format combined message with cleaner output
+        # Remove duplicate prefixes and make it more readable
+        clean_results = []
+        for r in results:
+            # Remove common prefixes like "✓ " if present
+            clean = r.replace("✓ ", "").strip()
+            clean_results.append(clean)
+        
+        return f"✓ Выполнено {len(results)} операций:\n" + "\n".join(f"  • {r}" for r in clean_results)
 

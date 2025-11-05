@@ -144,12 +144,68 @@ class PromptManager:
   "endDate": "2024-11-11T23:59:59+00:00"
 }
 
+6. "Создай две задачи: купить молоко и вынести мусор" (множественное создание):
+{
+  "operations": [
+    {
+      "type": "create_task",
+      "requires_current_data": false,
+      "params": {"title": "купить молоко"}
+    },
+    {
+      "type": "create_task",
+      "requires_current_data": false,
+      "params": {"title": "вынести мусор"}
+    }
+  ]
+}
+
+7. "Обнови задачи X и Y на завтра" (множественное обновление разных задач):
+{
+  "operations": [
+    {
+      "type": "update_task",
+      "requires_current_data": false,
+      "task_identifier": {"type": "title", "value": "X"},
+      "modifications": {
+        "dueDate": {"value": "2024-11-05T00:00:00+00:00", "modifier": "replace"}
+      }
+    },
+    {
+      "type": "update_task",
+      "requires_current_data": false,
+      "task_identifier": {"type": "title", "value": "Y"},
+      "modifications": {
+        "dueDate": {"value": "2024-11-05T00:00:00+00:00", "modifier": "replace"}
+      }
+    }
+  ]
+}
+
+8. "Удали задачи X и Y" (множественное удаление):
+{
+  "operations": [
+    {
+      "type": "delete_task",
+      "requires_current_data": false,
+      "task_identifier": {"type": "title", "value": "X"}
+    },
+    {
+      "type": "delete_task",
+      "requires_current_data": false,
+      "task_identifier": {"type": "title", "value": "Y"}
+    }
+  ]
+}
+
 ВАЖНО:
 - Для простых команд используй старый формат (action + поля)
 - Для сложных команд (несколько операций) используй новый формат (operations)
 - Для запросов на просмотр задач используй action: "list_tasks" с startDate/endDate
 - Для оптимизации расписания на период укажи period и/или startDate/endDate
 - КРИТИЧЕСКИ ВАЖНО: При указании списка/проекта ВСЕГДА используй точный ID из списка доступных проектов, который будет предоставлен в контексте. НЕ используй название проекта, только его ID.
+- Для множественных операций (создать/обновить/удалить несколько задач) используй массив operations с несколькими операциями одного или разных типов
+- Каждая операция в массиве operations должна быть независимой и иметь свой task_identifier (если требуется)
 - Если команда неоднозначна, верни JSON с полем "error" и сообщением."""
     
     def __init__(self):
