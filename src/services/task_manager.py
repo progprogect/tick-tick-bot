@@ -35,6 +35,45 @@ class TaskManager:
         from src.config.constants import TICKTICK_API_VERSION
         self.api_version = TICKTICK_API_VERSION
     
+    async def _resolve_project_id(self, project_identifier: Optional[str]) -> Optional[str]:
+        """
+        Resolve project identifier (name or ID) to project ID
+        
+        Args:
+            project_identifier: Project name or ID
+            
+        Returns:
+            Project ID or None if not found
+        """
+        if not project_identifier:
+            return None
+        
+        # Check if it looks like an ID (starts with "inbox" or is UUID-like)
+        # If it's already an ID, return as is
+        if project_identifier.startswith("inbox") or len(project_identifier) > 20:
+            return project_identifier
+        
+        # Otherwise, it's likely a project name - search for it
+        try:
+            projects = await self.client.get_projects()
+            project_identifier_lower = project_identifier.lower()
+            
+            for project in projects:
+                project_name = project.get('name', '')
+                project_id = project.get('id')
+                
+                if project_name.lower() == project_identifier_lower:
+                    self.logger.info(f"Found project '{project_name}' -> ID: {project_id}")
+                    return project_id
+            
+            # If not found, log warning but don't fail
+            self.logger.warning(f"Project '{project_identifier}' not found. Task will be created in default inbox.")
+            return None
+            
+        except Exception as e:
+            self.logger.warning(f"Failed to resolve project '{project_identifier}': {e}")
+            return None
+    
     async def create_task(self, command: ParsedCommand) -> str:
         """
         Create a new task
@@ -49,6 +88,9 @@ class TaskManager:
             if not command.title:
                 raise ValueError("Название задачи не указано")
             
+            # Resolve project_id if project name is provided
+            project_id = await self._resolve_project_id(command.project_id)
+            
             # Parse due date if provided
             due_date = command.due_date
             if due_date:
@@ -58,7 +100,7 @@ class TaskManager:
             
             task_data = await self.client.create_task(
                 title=command.title,
-                project_id=command.project_id,
+                project_id=project_id,
                 due_date=due_date,
                 priority=command.priority or 0,
                 tags=command.tags or [],
@@ -70,10 +112,12 @@ class TaskManager:
             
             # Save to cache for future lookups
             if task_id:
+                # Use resolved project_id (or fallback to task_data)
+                resolved_project_id = project_id or task_data.get('projectId')
                 self.cache.save_task(
                     task_id=task_id,
                     title=command.title,
-                    project_id=command.project_id or task_data.get('projectId'),
+                    project_id=resolved_project_id,
                 )
             
             return format_task_created(task_data)
@@ -341,13 +385,18 @@ class TaskManager:
             if not command.target_project_id:
                 raise ValueError("Целевой список не указан")
             
+            # Resolve target project_id (name or ID)
+            target_project_id = await self._resolve_project_id(command.target_project_id)
+            if not target_project_id:
+                raise ValueError(f"Список '{command.target_project_id}' не найден. Проверьте правильность названия или создайте список сначала.")
+            
             # Verify target project exists
             try:
                 projects = await self.client.get_projects()
-                target_project = next((p for p in projects if p.get('id') == command.target_project_id), None)
+                target_project = next((p for p in projects if p.get('id') == target_project_id), None)
                 if not target_project:
-                    raise ValueError(f"Целевой список '{command.target_project_id}' не найден. Проверьте правильность ID или создайте список сначала.")
-                self.logger.debug(f"Target project verified: {target_project.get('name', command.target_project_id)}")
+                    raise ValueError(f"Целевой список '{target_project_id}' не найден. Проверьте правильность ID или создайте список сначала.")
+                self.logger.debug(f"Target project verified: {target_project.get('name', target_project_id)}")
             except Exception as verify_error:
                 raise ValueError(f"Не удалось проверить существование целевого списка: {verify_error}")
             
@@ -364,9 +413,9 @@ class TaskManager:
             try:
                 task_data = await self.client.update_task(
                     task_id=command.task_id,
-                    project_id=command.target_project_id,
+                    project_id=target_project_id,
                 )
-                self.logger.info(f"Task moved via update_task: {command.task_id} -> {command.target_project_id}")
+                self.logger.info(f"Task moved via update_task: {command.task_id} -> {target_project_id}")
                 
                 # Wait a bit and verify move
                 import asyncio
@@ -374,18 +423,19 @@ class TaskManager:
                 
                 # Verify move by checking target project
                 try:
-                    target_tasks = await self.client.get_tasks(project_id=command.target_project_id)
+                    target_tasks = await self.client.get_tasks(project_id=target_project_id)
                     task_moved = any(t.get('id') == command.task_id for t in target_tasks)
                     
                     if task_moved:
                         # Update cache with new project_id
+                        project_name = target_project.get('name', target_project_id) if target_project else target_project_id
                         self.cache.save_task(
                             task_id=command.task_id,
                             title=current_task_info.get('title', ''),
-                            project_id=command.target_project_id,
+                            project_id=target_project_id,
                             status=current_task_info.get('status', 'active'),
                         )
-                        return f"✓ Задача перемещена в список {command.target_project_id}"
+                        return f"✓ Задача перемещена в список {project_name}"
                     else:
                         # Move didn't work, use fallback
                         self.logger.warning(f"update_task didn't move task, using fallback method")
@@ -417,7 +467,7 @@ class TaskManager:
                 # Create new task in target project
                 new_task_data = {
                     'title': full_task.get('title', current_task_info.get('title', '')),
-                    'project_id': command.target_project_id,
+                    'project_id': target_project_id,
                 }
                 
                 # Copy optional fields
@@ -442,13 +492,14 @@ class TaskManager:
                 self.cache.save_task(
                     task_id=new_task_id,
                     title=new_task_data.get('title', ''),
-                    project_id=command.target_project_id,
+                    project_id=target_project_id,
                     status='active',
                     original_task_id=command.task_id,  # Save mapping for reference
                 )
                 
-                self.logger.info(f"Task moved via create+delete: {command.task_id} -> {new_task_id} (in {command.target_project_id})")
-                return f"✓ Задача перемещена в список {command.target_project_id} (новая задача: {new_task_id})"
+                project_name = target_project.get('name', target_project_id) if target_project else target_project_id
+                self.logger.info(f"Task moved via create+delete: {command.task_id} -> {new_task_id} (in {target_project_id})")
+                return f"✓ Задача перемещена в список {project_name} (новая задача: {new_task_id})"
             
         except ValueError:
             raise
