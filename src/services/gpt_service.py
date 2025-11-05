@@ -48,11 +48,28 @@ class GPTService:
             # Get context (projects only) before parsing
             context_info = await self._get_context_for_parsing()
             
+            # Log context information for debugging
+            if context_info and context_info.get("projects"):
+                projects_count = len(context_info["projects"])
+                projects_names = [p.get("name", "") for p in context_info["projects"][:5]]
+                self.logger.debug(
+                    f"Context provided to GPT: {projects_count} projects "
+                    f"({', '.join(projects_names)}{'...' if projects_count > 5 else ''})"
+                )
+            else:
+                self.logger.warning("No projects context available for GPT parsing")
+            
             parsed_dict = await self.openai_client.parse_command(
                 command=command,
                 system_prompt=system_prompt,
                 context_info=context_info,
             )
+            
+            # Log what GPT returned, especially projectId
+            if "projectId" in parsed_dict:
+                self.logger.debug(f"GPT returned projectId: '{parsed_dict['projectId']}'")
+            else:
+                self.logger.debug("GPT did not return projectId")
             
             # Check for errors
             if "error" in parsed_dict:
@@ -63,7 +80,12 @@ class GPTService:
             # Create ParsedCommand object
             parsed_command = ParsedCommand(**parsed_dict)
             
-            self.logger.debug(f"Parsed command: {parsed_command}")
+            # Log parsed command details, especially project_id
+            self.logger.debug(
+                f"Parsed command: action='{parsed_command.action}', "
+                f"title='{parsed_command.title}', "
+                f"project_id='{parsed_command.project_id}'"
+            )
             
             return parsed_command
             
@@ -83,6 +105,7 @@ class GPTService:
         }
         
         if not self.ticktick_client:
+            self.logger.warning("TickTick client not available, cannot get projects context")
             return context
         
         try:
@@ -95,10 +118,16 @@ class GPTService:
                 }
                 for p in projects
             ]
+            
             self.logger.debug(f"Retrieved {len(context['projects'])} projects for context")
             
+            # Log project names for debugging (first 10)
+            if context["projects"]:
+                project_names = [p["name"] for p in context["projects"][:10]]
+                self.logger.debug(f"Projects available: {', '.join(project_names)}{'...' if len(context['projects']) > 10 else ''}")
+            
         except Exception as e:
-            self.logger.warning(f"Failed to get context for parsing: {e}")
+            self.logger.error(f"Failed to get context for parsing: {e}", exc_info=True)
             # Continue without context - better than failing completely
         
         return context

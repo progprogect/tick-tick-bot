@@ -46,32 +46,74 @@ class TaskManager:
             Project ID or None if not found
         """
         if not project_identifier:
+            self.logger.debug("No project identifier provided")
             return None
+        
+        self.logger.debug(f"Resolving project identifier: '{project_identifier}'")
         
         # Check if it looks like an ID (starts with "inbox" or is UUID-like)
         # If it's already an ID, return as is
         if project_identifier.startswith("inbox") or len(project_identifier) > 20:
+            self.logger.debug(f"Project identifier '{project_identifier}' looks like an ID, returning as is")
             return project_identifier
         
         # Otherwise, it's likely a project name - search for it
         try:
             projects = await self.client.get_projects()
-            project_identifier_lower = project_identifier.lower()
+            self.logger.debug(f"Retrieved {len(projects)} projects for search")
             
+            project_identifier_lower = project_identifier.lower().strip()
+            
+            # First, try exact match (case-insensitive)
             for project in projects:
-                project_name = project.get('name', '')
+                project_name = project.get('name', '').strip()
                 project_id = project.get('id')
                 
+                if not project_name or not project_id:
+                    continue
+                
                 if project_name.lower() == project_identifier_lower:
-                    self.logger.info(f"Found project '{project_name}' -> ID: {project_id}")
+                    self.logger.info(f"✓ Exact match found: project '{project_name}' (ID: {project_id})")
                     return project_id
             
-            # If not found, log warning but don't fail
-            self.logger.warning(f"Project '{project_identifier}' not found. Task will be created in default inbox.")
+            # If exact match not found, try partial match (contains)
+            self.logger.debug(f"Exact match not found, trying partial match for '{project_identifier}'")
+            matches = []
+            
+            for project in projects:
+                project_name = project.get('name', '').strip()
+                project_id = project.get('id')
+                
+                if not project_name or not project_id:
+                    continue
+                
+                project_name_lower = project_name.lower()
+                
+                # Check if project name contains identifier or vice versa
+                if (project_identifier_lower in project_name_lower or 
+                    project_name_lower in project_identifier_lower):
+                    matches.append((project_name, project_id))
+            
+            if matches:
+                # If multiple matches, prefer the one with shorter name (more specific)
+                matches.sort(key=lambda x: len(x[0]))
+                best_match = matches[0]
+                self.logger.info(f"✓ Partial match found: project '{best_match[0]}' (ID: {best_match[1]}) for '{project_identifier}'")
+                if len(matches) > 1:
+                    self.logger.warning(f"Multiple matches found: {[m[0] for m in matches]}, using '{best_match[0]}'")
+                return best_match[1]
+            
+            # If not found, log available projects for debugging
+            available_projects = [p.get('name', '') for p in projects if p.get('name')]
+            self.logger.warning(
+                f"Project '{project_identifier}' not found. "
+                f"Available projects: {', '.join(available_projects[:10])}"
+                f"{'...' if len(available_projects) > 10 else ''}"
+            )
             return None
             
         except Exception as e:
-            self.logger.warning(f"Failed to resolve project '{project_identifier}': {e}")
+            self.logger.error(f"Failed to resolve project '{project_identifier}': {e}", exc_info=True)
             return None
     
     async def create_task(self, command: ParsedCommand) -> str:
@@ -88,8 +130,24 @@ class TaskManager:
             if not command.title:
                 raise ValueError("Название задачи не указано")
             
+            self.logger.debug(f"Creating task: title='{command.title}', project_id from command='{command.project_id}'")
+            
             # Resolve project_id if project name is provided
+            original_project_id = command.project_id
             project_id = await self._resolve_project_id(command.project_id)
+            
+            # Log project resolution result
+            if original_project_id:
+                if project_id:
+                    self.logger.info(f"✓ Project resolved: '{original_project_id}' -> '{project_id}'")
+                else:
+                    self.logger.warning(
+                        f"⚠ Project '{original_project_id}' not found. "
+                        f"Task will be created in default inbox. "
+                        f"Check if project name is correct or project exists in TickTick."
+                    )
+            else:
+                self.logger.debug("No project specified, task will be created in default inbox")
             
             # Parse due date if provided
             due_date = command.due_date
@@ -97,6 +155,8 @@ class TaskManager:
                 parsed_date = parse_date(due_date)
                 if parsed_date:
                     due_date = parsed_date
+            
+            self.logger.debug(f"Creating task with project_id='{project_id}', due_date='{due_date}'")
             
             task_data = await self.client.create_task(
                 title=command.title,
@@ -108,17 +168,30 @@ class TaskManager:
             )
             
             task_id = task_data.get('id')
-            self.logger.info(f"Task created: {task_id}")
+            actual_project_id = task_data.get('projectId')
+            
+            self.logger.info(
+                f"Task created: id='{task_id}', "
+                f"title='{command.title}', "
+                f"project_id='{actual_project_id}'"
+            )
+            
+            # Validate that task was created in expected project
+            if original_project_id and project_id and actual_project_id != project_id:
+                self.logger.warning(
+                    f"⚠ Project mismatch: expected '{project_id}', but task created in '{actual_project_id}'"
+                )
             
             # Save to cache for future lookups
             if task_id:
                 # Use resolved project_id (or fallback to task_data)
-                resolved_project_id = project_id or task_data.get('projectId')
+                resolved_project_id = project_id or actual_project_id
                 self.cache.save_task(
                     task_id=task_id,
                     title=command.title,
                     project_id=resolved_project_id,
                 )
+                self.logger.debug(f"Task saved to cache: id='{task_id}', project_id='{resolved_project_id}'")
             
             return format_task_created(task_data)
             
