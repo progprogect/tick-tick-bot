@@ -2,7 +2,7 @@
 Prompt management for GPT service
 """
 
-from typing import Optional
+from typing import Optional, Dict, Any
 from src.utils.logger import logger
 
 

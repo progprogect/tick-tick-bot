@@ -273,6 +273,10 @@ class DataFetcher:
             project_id = cached_task.get('project_id') if cached_task else None
             
             if project_id:
+                # Ensure client is authenticated
+                if not self.client.access_token:
+                    await self.client.authenticate()
+                
                 task = await self.client.get(
                     endpoint=f"/open/v1/project/{project_id}/task/{task_id}",
                     headers=self.client._get_headers(),
