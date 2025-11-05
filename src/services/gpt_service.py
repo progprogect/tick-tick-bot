@@ -48,18 +48,44 @@ class GPTService:
         try:
             self.logger.info(f"[Multi-stage] Starting command parsing: {command}")
             
+            # Log client status
+            if self.ticktick_client:
+                self.logger.debug(f"[Multi-stage] TickTick client available: {type(self.ticktick_client).__name__}")
+                self.logger.debug(f"[Multi-stage] TickTick client has access_token: {hasattr(self.ticktick_client, 'access_token') and bool(self.ticktick_client.access_token)}")
+            else:
+                self.logger.error("[Multi-stage] TickTick client is None!")
+                raise ValueError("TickTick client not available for data fetching")
+            
             # Stage 1: Determine data requirements
+            self.logger.info("[Stage 1] Determining data requirements...")
             requirements = await self.determine_data_requirements(command)
             action_type = requirements.get("action_type", "create_task")
+            self.logger.info(f"[Stage 1] Action type determined: {action_type}")
+            self.logger.debug(f"[Stage 1] Requirements: {requirements}")
             
-            self.logger.info(f"[Stage 2] Fetching data for requirements: {requirements}")
+            self.logger.info(f"[Stage 2] Fetching data for requirements...")
             
             # Stage 2: Fetch data
             if not self.ticktick_client:
+                self.logger.error("[Stage 2] TickTick client is None after Stage 1!")
                 raise ValueError("TickTick client not available for data fetching")
             
+            # Ensure client is authenticated before fetching data
+            try:
+                if not hasattr(self.ticktick_client, 'access_token') or not self.ticktick_client.access_token:
+                    self.logger.info("[Stage 2] Authenticating TickTick client...")
+                    auth_result = await self.ticktick_client.authenticate()
+                    self.logger.info(f"[Stage 2] Authentication result: {auth_result}")
+                else:
+                    self.logger.debug("[Stage 2] TickTick client already authenticated")
+            except Exception as e:
+                self.logger.error(f"[Stage 2] Authentication error: {e}", exc_info=True)
+                raise ValueError(f"Ошибка аутентификации TickTick: {str(e)}")
+            
             data_fetcher = DataFetcher(self.ticktick_client)
+            self.logger.debug(f"[Stage 2] DataFetcher created, fetching data...")
             fetched_data = await data_fetcher.fetch_data_requirements(requirements)
+            self.logger.debug(f"[Stage 2] Data fetched: {len(fetched_data.get('tasks', {}))} tasks, {len(fetched_data.get('projects', {}))} projects")
             
             # If current_task_data is needed but not yet fetched, fetch it using task_id from tasks
             required_data = requirements.get("required_data", {})

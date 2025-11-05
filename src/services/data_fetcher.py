@@ -52,7 +52,14 @@ class DataFetcher:
         Returns:
             Dictionary with fetched data
         """
-        self.logger.debug(f"Fetching data requirements: {requirements}")
+        self.logger.info(f"[DataFetcher] Starting data fetch for requirements: {requirements}")
+        
+        if not self.client:
+            self.logger.error("[DataFetcher] Client is None!")
+            raise ValueError("TickTick client not available")
+        
+        self.logger.debug(f"[DataFetcher] Client type: {type(self.client).__name__}")
+        self.logger.debug(f"[DataFetcher] Client has access_token: {hasattr(self.client, 'access_token') and bool(self.client.access_token)}")
         
         fetched_data = {
             "tasks": {},
@@ -62,25 +69,34 @@ class DataFetcher:
         }
         
         required_data = requirements.get("required_data", {})
+        self.logger.debug(f"[DataFetcher] Required data: {required_data}")
         
         # Fetch tasks by title
         task_titles = required_data.get("task_by_title", [])
+        self.logger.info(f"[DataFetcher] Fetching {len(task_titles)} tasks by title: {task_titles}")
         for title in task_titles:
             project_id = required_data.get("project_by_name_for_task", {}).get(title)
+            self.logger.debug(f"[DataFetcher] Fetching task '{title}' (project_id: {project_id})")
             task = await self.fetch_task_by_title(title, project_id)
             if task:
                 fetched_data["tasks"][title] = task
+                self.logger.info(f"[DataFetcher] Task '{title}' found: {task.get('id')}")
             else:
                 fetched_data["tasks"][title] = None
+                self.logger.warning(f"[DataFetcher] Task '{title}' not found")
         
         # Fetch projects by name
         project_names = required_data.get("project_by_name", [])
+        self.logger.info(f"[DataFetcher] Fetching {len(project_names)} projects by name: {project_names}")
         for name in project_names:
+            self.logger.debug(f"[DataFetcher] Fetching project '{name}'")
             project = await self.fetch_project_by_name(name)
             if project:
                 fetched_data["projects"][name] = project
+                self.logger.info(f"[DataFetcher] Project '{name}' found: {project.get('id')}")
             else:
                 fetched_data["projects"][name] = None
+                self.logger.warning(f"[DataFetcher] Project '{name}' not found")
         
         # Fetch task data by task_id
         task_ids = required_data.get("task_data", [])
@@ -114,8 +130,18 @@ class DataFetcher:
             )
             fetched_data["tasks_by_filters"] = tasks
         
-        self.logger.debug(f"Fetched data: {len(fetched_data.get('tasks', {}))} tasks, "
-                         f"{len(fetched_data.get('projects', {}))} projects")
+        self.logger.info(f"[DataFetcher] Data fetch completed: {len(fetched_data.get('tasks', {}))} tasks, "
+                         f"{len(fetched_data.get('projects', {}))} projects, "
+                         f"{len(fetched_data.get('task_data', {}))} task data entries")
+        
+        # Log summary of what was found/not found
+        tasks_found = sum(1 for t in fetched_data.get('tasks', {}).values() if t is not None)
+        tasks_not_found = sum(1 for t in fetched_data.get('tasks', {}).values() if t is None)
+        projects_found = sum(1 for p in fetched_data.get('projects', {}).values() if p is not None)
+        projects_not_found = sum(1 for p in fetched_data.get('projects', {}).values() if p is None)
+        
+        self.logger.info(f"[DataFetcher] Summary: {tasks_found} tasks found, {tasks_not_found} not found; "
+                        f"{projects_found} projects found, {projects_not_found} not found")
         
         return fetched_data
     
