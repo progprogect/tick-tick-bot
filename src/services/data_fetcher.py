@@ -86,6 +86,9 @@ class DataFetcher:
         tasks_from_cache = []
         cache_task_ids = set()
         
+        # Log cache size for debugging
+        self.logger.info(f"[DataFetcher] Cache contains {len(self.cache._cache)} tasks")
+        
         for task_id, task_data in self.cache._cache.items():
             if not task_id:
                 continue
