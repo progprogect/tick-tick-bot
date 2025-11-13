@@ -65,14 +65,17 @@ class DataFetcher:
             return self._all_tasks_cache
         
         # Fetch all tasks (including completed ones)
-        self.logger.info(f"[DataFetcher] Fetching all tasks from all projects (including completed)...")
-        # Get incomplete tasks
+        self.logger.info(f"[DataFetcher] ===== FETCHING ALL TASKS FROM ALL PROJECTS =====")
+        
+        # Get incomplete tasks from API (GET /project/{projectId}/data returns only status=0)
         incomplete_tasks = await self.client.get_tasks()
+        self.logger.info(f"[DataFetcher] Retrieved {len(incomplete_tasks)} incomplete tasks from API")
         
         # Also get completed tasks from cache (they might not be in API response)
         all_tasks = list(incomplete_tasks)  # Start with incomplete tasks
         
         # Try to get completed tasks from cache
+        self.cache._load_cache()  # Ensure cache is loaded
         completed_tasks_from_cache = []
         for task_id, task_data in self.cache._cache.items():
             if task_data.get("status") == "completed":
@@ -88,10 +91,18 @@ class DataFetcher:
             self.logger.info(f"[DataFetcher] Adding {len(completed_tasks_from_cache)} completed tasks from cache")
             all_tasks.extend(completed_tasks_from_cache)
         
+        # Log all task titles for debugging
+        if all_tasks:
+            task_titles = [t.get("title", "") for t in all_tasks]
+            self.logger.info(f"[DataFetcher] All task titles ({len(task_titles)} tasks): {task_titles}")
+        
         # Update cache
         self._all_tasks_cache = all_tasks
         self._all_tasks_cache_time = datetime.now()
-        self.logger.info(f"[DataFetcher] Cached {len(all_tasks)} tasks ({len(incomplete_tasks)} incomplete + {len(completed_tasks_from_cache)} completed, TTL: 2 minutes)")
+        self.logger.info(
+            f"[DataFetcher] Cached {len(all_tasks)} tasks "
+            f"({len(incomplete_tasks)} incomplete + {len(completed_tasks_from_cache)} completed, TTL: 2 minutes)"
+        )
         
         return all_tasks
     

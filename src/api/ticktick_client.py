@@ -560,10 +560,30 @@ class TickTickClient(BaseAPIClient):
                 # First, get list of projects
                 try:
                     projects = await self.get_projects()
+                    self.logger.info(f"[get_tasks] Retrieved {len(projects)} projects from API")
+                    
+                    # Log project details for debugging
+                    for project in projects[:5]:  # Log first 5
+                        self.logger.debug(
+                            f"[get_tasks] Project: {project.get('name', 'N/A')} "
+                            f"(id: {project.get('id', 'N/A')}, "
+                            f"kind: {project.get('kind', 'N/A')}, "
+                            f"closed: {project.get('closed', False)})"
+                        )
                     
                     for project in projects:
                         project_id_val = project.get("id")
+                        project_name = project.get("name", "N/A")
+                        project_kind = project.get("kind", "TASK")
+                        project_closed = project.get("closed", False)
+                        
                         if not project_id_val:
+                            self.logger.warning(f"[get_tasks] Project without ID: {project}")
+                            continue
+                        
+                        # Skip NOTE projects (they don't have tasks)
+                        if project_kind == "NOTE":
+                            self.logger.debug(f"[get_tasks] Skipping NOTE project: {project_name}")
                             continue
                         
                         try:
@@ -576,11 +596,29 @@ class TickTickClient(BaseAPIClient):
                                 tasks = response["tasks"]
                                 if isinstance(tasks, list):
                                     all_tasks.extend(tasks)
+                                    self.logger.debug(
+                                        f"[get_tasks] Retrieved {len(tasks)} tasks from project "
+                                        f"'{project_name}' (id: {project_id_val}, closed: {project_closed})"
+                                    )
+                                else:
+                                    self.logger.warning(
+                                        f"[get_tasks] Invalid tasks format from project {project_name}: {type(tasks)}"
+                                    )
+                            else:
+                                self.logger.warning(
+                                    f"[get_tasks] No tasks in response from project {project_name} "
+                                    f"(response keys: {list(response.keys()) if isinstance(response, dict) else 'not a dict'})"
+                                )
                         except Exception as e:
-                            self.logger.warning(f"Failed to get tasks from project {project_id_val}: {e}")
+                            self.logger.warning(
+                                f"[get_tasks] Failed to get tasks from project '{project_name}' "
+                                f"(id: {project_id_val}): {e}"
+                            )
                             continue
+                    
+                    self.logger.info(f"[get_tasks] Total tasks retrieved from all projects: {len(all_tasks)}")
                 except Exception as e:
-                    self.logger.warning(f"Failed to get projects: {e}")
+                    self.logger.error(f"[get_tasks] Failed to get projects: {e}", exc_info=True)
                     return []
             
             # Filter by status if specified
