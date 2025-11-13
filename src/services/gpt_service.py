@@ -128,16 +128,25 @@ class GPTService:
             
             # Log what GPT parsed
             if parsed_command.title:
-                self.logger.info(f"[Stage 3] GPT parsed task title: '{parsed_command.title}'")
+                self.logger.warning(
+                    f"[Stage 3] GPT used 'title' instead of 'taskId': '{parsed_command.title}' "
+                    f"(should use taskId from all_tasks list!)"
+                )
             if parsed_command.task_id:
-                self.logger.info(f"[Stage 3] GPT parsed task_id: '{parsed_command.task_id}'")
+                self.logger.info(f"[Stage 3] ✓ GPT correctly used taskId: '{parsed_command.task_id}'")
             if parsed_command.operations:
                 for i, op in enumerate(parsed_command.operations):
-                    if op.task_identifier and op.task_identifier.value:
-                        self.logger.info(
-                            f"[Stage 3] GPT parsed operation {i+1} task identifier: "
-                            f"'{op.task_identifier.value}' (type: {op.task_identifier.type})"
-                        )
+                    if op.task_identifier:
+                        if op.task_identifier.type == "id":
+                            self.logger.info(
+                                f"[Stage 3] ✓ GPT correctly used taskId in operation {i+1}: "
+                                f"'{op.task_identifier.value}'"
+                            )
+                        elif op.task_identifier.type == "title":
+                            self.logger.warning(
+                                f"[Stage 3] ✗ GPT used 'title' instead of 'id' in operation {i+1}: "
+                                f"'{op.task_identifier.value}' (should use taskId from all_tasks list!)"
+                            )
             
             self.logger.info(f"[Multi-stage] Command parsing completed successfully")
             
@@ -508,23 +517,25 @@ class GPTService:
         all_tasks = fetched_data.get("all_tasks", [])
         if all_tasks:
             lines.append("ВСЕ ЗАДАЧИ ПОЛЬЗОВАТЕЛЯ (ОБЯЗАТЕЛЬНО используй этот список для поиска задач):")
-            for task in all_tasks[:100]:  # Увеличил до 100 задач
+            # Ограничиваем до 30 задач для экономии токенов
+            for task in all_tasks[:30]:
                 task_id = task.get("id", "N/A")
                 title = task.get("title", "Без названия")
                 project_id = task.get("projectId", "N/A")
                 status = task.get("status", 0)
                 status_text = "Завершена" if status == 2 else "Активна"
                 lines.append(f"  - ID: {task_id}, Название: '{title}', Проект: {project_id}, Статус: {status_text}")
-            if len(all_tasks) > 100:
-                lines.append(f"  ... и еще {len(all_tasks) - 100} задач")
+            if len(all_tasks) > 30:
+                lines.append(f"  ... и еще {len(all_tasks) - 30} задач (всего {len(all_tasks)} задач)")
             lines.append("")
-            lines.append("КРИТИЧЕСКИ ВАЖНО:")
-            lines.append("1. Если команда содержит название задачи (например, 'Перенеси задачу X на завтра'),")
-            lines.append("   ОБЯЗАТЕЛЬНО найди задачу в списке выше по названию (игнорируя слова 'на завтра', 'на 8:00' и т.д.)")
-            lines.append("2. Используй ТОЧНОЕ название из списка (регистр и пробелы могут отличаться - ищи похожее)")
-            lines.append("3. Если нашел задачу - используй её ID в поле taskId или task_identifier.value")
-            lines.append("4. Если пользователь сказал 'задача X на завтра', ищи задачу с названием 'X' в списке, а не 'X на завтра'")
-            lines.append("5. Для поиска используй частичное совпадение - если название похоже, это нужная задача")
+            lines.append("КРИТИЧЕСКИ ВАЖНО - ИСПОЛЬЗОВАНИЕ taskId:")
+            lines.append("1. Если команда содержит название задачи, НАЙДИ задачу в списке выше по названию")
+            lines.append("2. Если нашел задачу - ОБЯЗАТЕЛЬНО используй её ID в поле 'taskId' (НЕ 'title'!)")
+            lines.append("3. Для простых команд: {\"action\": \"update_task\", \"taskId\": \"НАЙДЕННЫЙ_ID\", ...}")
+            lines.append("4. Для composite команд: {\"task_identifier\": {\"type\": \"id\", \"value\": \"НАЙДЕННЫЙ_ID\"}, ...}")
+            lines.append("5. НИКОГДА не используй 'title' если есть список всех задач - только 'taskId'!")
+            lines.append("6. Если пользователь сказал 'задача X на завтра', ищи 'X' в списке и используй её ID")
+            lines.append("7. Для поиска используй частичное совпадение названий (регистр не важен)")
             lines.append("")
         
         # Format tasks (specific tasks found by title)

@@ -64,14 +64,34 @@ class DataFetcher:
             self.logger.info(f"[DataFetcher] Using cached all tasks ({len(self._all_tasks_cache)} tasks)")
             return self._all_tasks_cache
         
-        # Fetch all tasks
-        self.logger.info(f"[DataFetcher] Fetching all tasks from all projects...")
-        all_tasks = await self.client.get_tasks()
+        # Fetch all tasks (including completed ones)
+        self.logger.info(f"[DataFetcher] Fetching all tasks from all projects (including completed)...")
+        # Get incomplete tasks
+        incomplete_tasks = await self.client.get_tasks()
+        
+        # Also get completed tasks from cache (they might not be in API response)
+        all_tasks = list(incomplete_tasks)  # Start with incomplete tasks
+        
+        # Try to get completed tasks from cache
+        completed_tasks_from_cache = []
+        for task_id, task_data in self.cache._cache.items():
+            if task_data.get("status") == "completed":
+                # Convert cache format to API format
+                completed_tasks_from_cache.append({
+                    "id": task_id,
+                    "title": task_data.get("title", ""),
+                    "projectId": task_data.get("project_id"),
+                    "status": 2,  # Completed
+                })
+        
+        if completed_tasks_from_cache:
+            self.logger.info(f"[DataFetcher] Adding {len(completed_tasks_from_cache)} completed tasks from cache")
+            all_tasks.extend(completed_tasks_from_cache)
         
         # Update cache
         self._all_tasks_cache = all_tasks
         self._all_tasks_cache_time = datetime.now()
-        self.logger.info(f"[DataFetcher] Cached {len(all_tasks)} tasks (TTL: 2 minutes)")
+        self.logger.info(f"[DataFetcher] Cached {len(all_tasks)} tasks ({len(incomplete_tasks)} incomplete + {len(completed_tasks_from_cache)} completed, TTL: 2 minutes)")
         
         return all_tasks
     
