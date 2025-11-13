@@ -113,6 +113,8 @@ class DataFetcher:
                 cache_task["startDate"] = task_data["startDate"]
             if "priority" in task_data:
                 cache_task["priority"] = task_data["priority"]
+            if "sort_order" in task_data:
+                cache_task["sortOrder"] = task_data["sort_order"]
             
             tasks_from_cache.append(cache_task)
             cache_task_ids.add(task_id)

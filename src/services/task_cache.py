@@ -144,6 +144,7 @@ class TaskCacheService:
         notes: Optional[str] = None,
         reminders: Optional[List[str]] = None,
         repeat_flag: Optional[str] = None,
+        sort_order: Optional[int] = None,
     ):
         """
         Save task to cache
@@ -174,6 +175,7 @@ class TaskCacheService:
             'notes': notes if notes is not None else existing_data.get('notes', ''),
             'reminders': reminders if reminders is not None else existing_data.get('reminders', []),
             'repeat_flag': repeat_flag if repeat_flag is not None else existing_data.get('repeat_flag'),
+            'sort_order': sort_order if sort_order is not None else existing_data.get('sort_order'),
             'created_at': existing_data.get('created_at', datetime.now().isoformat()),
             'updated_at': datetime.now().isoformat(),
         }
@@ -309,6 +311,7 @@ class TaskCacheService:
                     notes=task.get("content", ""),
                     reminders=task.get("reminders", []),
                     repeat_flag=task.get("repeatFlag"),
+                    sort_order=task.get("sortOrder"),
                 )
                 self.logger.info(f"[TaskCache] Synced task {task_id} from API to cache")
             else:
@@ -362,6 +365,7 @@ class TaskCacheService:
                             notes=task.get("content", ""),
                             reminders=task.get("reminders", []),
                             repeat_flag=task.get("repeatFlag"),
+                            sort_order=task.get("sortOrder"),
                         )
                         count += 1
                     

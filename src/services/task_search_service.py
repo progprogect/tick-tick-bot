@@ -410,6 +410,7 @@ class TaskSearchService:
                 notes=task.get("content", ""),
                 reminders=task.get("reminders", []),
                 repeat_flag=task.get("repeatFlag"),
+                sort_order=task.get("sortOrder"),
             )
             self.logger.debug(f"[TaskSearch] Saved task {task_id} to cache")
         except Exception as e:
