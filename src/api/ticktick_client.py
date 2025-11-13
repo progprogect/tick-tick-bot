@@ -669,7 +669,17 @@ class TickTickClient(BaseAPIClient):
                             )
                             continue
                     
-                    self.logger.info(f"[get_tasks] Total tasks retrieved from all projects: {len(all_tasks)}")
+                    # Sort all tasks by sortOrder across all projects (more negative = newer)
+                    # This ensures we get the most recent tasks from ALL projects, not just per project
+                    all_tasks = sorted(
+                        all_tasks,
+                        key=lambda t: t.get("sortOrder", 0),
+                        reverse=False  # More negative = newer, so reverse=False gives newest first
+                    )
+                    self.logger.info(
+                        f"[get_tasks] Total tasks retrieved from all projects: {len(all_tasks)} "
+                        f"(sorted by sortOrder across all projects, most recent first)"
+                    )
                 except Exception as e:
                     self.logger.error(f"[get_tasks] Failed to get projects: {e}", exc_info=True)
                     return []

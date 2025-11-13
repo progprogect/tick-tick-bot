@@ -124,6 +124,19 @@ class DataFetcher:
             )
             all_tasks.extend(tasks_from_cache)
         
+        # Sort all tasks by sortOrder across all projects (more negative = newer)
+        # This ensures we get the most recent tasks from ALL projects, not just per project
+        # For tasks from cache without sortOrder, use a default value (0 = oldest)
+        all_tasks = sorted(
+            all_tasks,
+            key=lambda t: t.get("sortOrder", 0),
+            reverse=False  # More negative = newer, so reverse=False gives newest first
+        )
+        self.logger.info(
+            f"[DataFetcher] Sorted all {len(all_tasks)} tasks by sortOrder "
+            f"(across all projects, most recent first)"
+        )
+        
         # Log all task titles for debugging
         if all_tasks:
             task_titles = [t.get("title", "") for t in all_tasks]
