@@ -517,8 +517,8 @@ class GPTService:
         all_tasks = fetched_data.get("all_tasks", [])
         if all_tasks:
             lines.append("ВСЕ ЗАДАЧИ ПОЛЬЗОВАТЕЛЯ (ОБЯЗАТЕЛЬНО используй этот список для поиска задач):")
-            # Ограничиваем до 30 задач для экономии токенов
-            for task in all_tasks[:30]:
+            # Показываем все задачи (модель gpt-4o поддерживает до 128k токенов)
+            for task in all_tasks:
                 task_id = task.get("id", "N/A")
                 title = task.get("title", "Без названия")
                 project_id = task.get("projectId", "N/A")

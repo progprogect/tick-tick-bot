@@ -7,9 +7,10 @@ TELEGRAM_MAX_MESSAGE_LENGTH = 4096
 TELEGRAM_VOICE_MAX_DURATION = 60  # seconds
 
 # OpenAI
-OPENAI_DEFAULT_MODEL = "gpt-4"
-OPENAI_FALLBACK_MODEL = "gpt-3.5-turbo"
-OPENAI_MAX_TOKENS = 2000
+# Используем gpt-4o или gpt-4-turbo для большого контекста (до 128k токенов)
+OPENAI_DEFAULT_MODEL = "gpt-4o"  # Поддерживает до 128k токенов контекста
+OPENAI_FALLBACK_MODEL = "gpt-4-turbo"  # Поддерживает до 128k токенов контекста
+OPENAI_MAX_TOKENS = 4000  # Увеличено для более длинных ответов
 OPENAI_TEMPERATURE = 0.7
 
 # TickTick API
