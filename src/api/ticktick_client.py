@@ -582,9 +582,19 @@ class TickTickClient(BaseAPIClient):
                         if isinstance(inbox_response, dict) and "tasks" in inbox_response:
                             inbox_tasks = inbox_response["tasks"]
                             if isinstance(inbox_tasks, list):
+                                # Sort by sortOrder (more negative = newer) and take last 99
+                                # API returns only 99 tasks, but we want the most recent ones
+                                sorted_inbox_tasks = sorted(
+                                    inbox_tasks,
+                                    key=lambda t: t.get("sortOrder", 0),
+                                    reverse=True  # More negative = newer, so reverse=True gives newest first
+                                )
+                                # Take last 99 (most recent)
+                                inbox_tasks = sorted_inbox_tasks[:99]
                                 all_tasks.extend(inbox_tasks)
                                 self.logger.info(
-                                    f"[get_tasks] Retrieved {len(inbox_tasks)} tasks from Inbox"
+                                    f"[get_tasks] Retrieved {len(inbox_tasks)} most recent tasks from Inbox "
+                                    f"(sorted by sortOrder, most recent first)"
                                 )
                             else:
                                 self.logger.warning(
@@ -626,10 +636,20 @@ class TickTickClient(BaseAPIClient):
                             if isinstance(response, dict) and "tasks" in response:
                                 tasks = response["tasks"]
                                 if isinstance(tasks, list):
+                                    # Sort by sortOrder (more negative = newer) and take last 99
+                                    # API returns only 99 tasks, but we want the most recent ones
+                                    sorted_tasks = sorted(
+                                        tasks,
+                                        key=lambda t: t.get("sortOrder", 0),
+                                        reverse=True  # More negative = newer, so reverse=True gives newest first
+                                    )
+                                    # Take last 99 (most recent)
+                                    tasks = sorted_tasks[:99]
                                     all_tasks.extend(tasks)
                                     self.logger.debug(
-                                        f"[get_tasks] Retrieved {len(tasks)} tasks from project "
-                                        f"'{project_name}' (id: {project_id_val}, closed: {project_closed})"
+                                        f"[get_tasks] Retrieved {len(tasks)} most recent tasks from project "
+                                        f"'{project_name}' (id: {project_id_val}, closed: {project_closed}, "
+                                        f"sorted by sortOrder, most recent first)"
                                     )
                                 else:
                                     self.logger.warning(

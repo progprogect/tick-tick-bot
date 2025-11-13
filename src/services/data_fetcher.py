@@ -68,28 +68,61 @@ class DataFetcher:
         self.logger.info(f"[DataFetcher] ===== FETCHING ALL TASKS FROM ALL PROJECTS =====")
         
         # Get incomplete tasks from API (GET /project/{projectId}/data returns only status=0)
+        # ⚠️ ВАЖНО: API возвращает максимум 99 задач из каждого проекта (ограничение TickTick API)
         incomplete_tasks = await self.client.get_tasks()
         self.logger.info(f"[DataFetcher] Retrieved {len(incomplete_tasks)} incomplete tasks from API")
         
-        # Also get completed tasks from cache (they might not be in API response)
-        all_tasks = list(incomplete_tasks)  # Start with incomplete tasks
+        # Create a set of task IDs from API to check for duplicates
+        api_task_ids = {task.get("id") for task in incomplete_tasks if task.get("id")}
         
-        # Try to get completed tasks from cache
+        # Start with incomplete tasks from API
+        all_tasks = list(incomplete_tasks)
+        
+        # Load cache and add tasks from cache that are NOT in API response
+        # This includes:
+        # 1. Completed tasks (status=2) - API не возвращает их
+        # 2. Active tasks beyond the 99 limit - API возвращает только первые 99
         self.cache._load_cache()  # Ensure cache is loaded
-        completed_tasks_from_cache = []
-        for task_id, task_data in self.cache._cache.items():
-            if task_data.get("status") == "completed":
-                # Convert cache format to API format
-                completed_tasks_from_cache.append({
-                    "id": task_id,
-                    "title": task_data.get("title", ""),
-                    "projectId": task_data.get("project_id"),
-                    "status": 2,  # Completed
-                })
+        tasks_from_cache = []
+        cache_task_ids = set()
         
-        if completed_tasks_from_cache:
-            self.logger.info(f"[DataFetcher] Adding {len(completed_tasks_from_cache)} completed tasks from cache")
-            all_tasks.extend(completed_tasks_from_cache)
+        for task_id, task_data in self.cache._cache.items():
+            if not task_id:
+                continue
+            
+            # Skip deleted tasks
+            if task_data.get("status") == "deleted":
+                continue
+            
+            # Skip if already in API response
+            if task_id in api_task_ids:
+                continue
+            
+            # Convert cache format to API format
+            cache_task = {
+                "id": task_id,
+                "title": task_data.get("title", ""),
+                "projectId": task_data.get("project_id"),
+                "status": 2 if task_data.get("status") == "completed" else 0,
+            }
+            
+            # Add additional fields if available in cache
+            if "dueDate" in task_data:
+                cache_task["dueDate"] = task_data["dueDate"]
+            if "startDate" in task_data:
+                cache_task["startDate"] = task_data["startDate"]
+            if "priority" in task_data:
+                cache_task["priority"] = task_data["priority"]
+            
+            tasks_from_cache.append(cache_task)
+            cache_task_ids.add(task_id)
+        
+        if tasks_from_cache:
+            self.logger.info(
+                f"[DataFetcher] Adding {len(tasks_from_cache)} tasks from cache "
+                f"(not in API response: completed or beyond 99 limit)"
+            )
+            all_tasks.extend(tasks_from_cache)
         
         # Log all task titles for debugging
         if all_tasks:
