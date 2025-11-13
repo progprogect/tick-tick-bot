@@ -582,13 +582,25 @@ class TickTickClient(BaseAPIClient):
                         if isinstance(inbox_response, dict) and "tasks" in inbox_response:
                             inbox_tasks = inbox_response["tasks"]
                             if isinstance(inbox_tasks, list):
-                                # Sort by sortOrder (more negative = newer) and take first 99
-                                # API returns only 99 tasks, but we want the most recent ones
-                                # More negative sortOrder = newer task, so reverse=False gives newest first
+                                # Sort by timestamp from ID (more reliable than sortOrder)
+                                # ObjectId contains timestamp in first 8 hex characters
+                                def get_task_timestamp(task):
+                                    task_id = task.get("id", "")
+                                    if task_id and len(task_id) >= 8:
+                                        try:
+                                            # Extract timestamp from first 8 hex chars
+                                            hex_timestamp = task_id[:8]
+                                            timestamp = int(hex_timestamp, 16)
+                                            return timestamp
+                                        except:
+                                            pass
+                                    # Fallback to sortOrder if ID parsing fails
+                                    return task.get("sortOrder", 0)
+                                
                                 sorted_inbox_tasks = sorted(
                                     inbox_tasks,
-                                    key=lambda t: t.get("sortOrder", 0),
-                                    reverse=False  # More negative = newer, so reverse=False gives newest first
+                                    key=get_task_timestamp,
+                                    reverse=True  # Higher timestamp = newer task
                                 )
                                 # Take first 99 (most recent)
                                 inbox_tasks = sorted_inbox_tasks[:99]
@@ -637,13 +649,25 @@ class TickTickClient(BaseAPIClient):
                             if isinstance(response, dict) and "tasks" in response:
                                 tasks = response["tasks"]
                                 if isinstance(tasks, list):
-                                    # Sort by sortOrder (more negative = newer) and take first 99
-                                    # API returns only 99 tasks, but we want the most recent ones
-                                    # More negative sortOrder = newer task, so reverse=False gives newest first
+                                    # Sort by timestamp from ID (more reliable than sortOrder)
+                                    # ObjectId contains timestamp in first 8 hex characters
+                                    def get_task_timestamp(task):
+                                        task_id = task.get("id", "")
+                                        if task_id and len(task_id) >= 8:
+                                            try:
+                                                # Extract timestamp from first 8 hex chars
+                                                hex_timestamp = task_id[:8]
+                                                timestamp = int(hex_timestamp, 16)
+                                                return timestamp
+                                            except:
+                                                pass
+                                        # Fallback to sortOrder if ID parsing fails
+                                        return task.get("sortOrder", 0)
+                                    
                                     sorted_tasks = sorted(
                                         tasks,
-                                        key=lambda t: t.get("sortOrder", 0),
-                                        reverse=False  # More negative = newer, so reverse=False gives newest first
+                                        key=get_task_timestamp,
+                                        reverse=True  # Higher timestamp = newer task
                                     )
                                     # Take first 99 (most recent)
                                     tasks = sorted_tasks[:99]
@@ -669,12 +693,25 @@ class TickTickClient(BaseAPIClient):
                             )
                             continue
                     
-                    # Sort all tasks by sortOrder across all projects (more negative = newer)
-                    # This ensures we get the most recent tasks from ALL projects, not just per project
+                    # Sort all tasks by timestamp from ID (more reliable than sortOrder)
+                    # ObjectId contains timestamp in first 8 hex characters
+                    def get_task_timestamp(task):
+                        task_id = task.get("id", "")
+                        if task_id and len(task_id) >= 8:
+                            try:
+                                # Extract timestamp from first 8 hex chars
+                                hex_timestamp = task_id[:8]
+                                timestamp = int(hex_timestamp, 16)
+                                return timestamp
+                            except:
+                                pass
+                        # Fallback to sortOrder if ID parsing fails
+                        return task.get("sortOrder", 0)
+                    
                     all_tasks = sorted(
                         all_tasks,
-                        key=lambda t: t.get("sortOrder", 0),
-                        reverse=False  # More negative = newer, so reverse=False gives newest first
+                        key=get_task_timestamp,
+                        reverse=True  # Higher timestamp = newer task
                     )
                     self.logger.info(
                         f"[get_tasks] Total tasks retrieved from all projects: {len(all_tasks)} "
