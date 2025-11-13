@@ -525,8 +525,7 @@ class GPTService:
                 status = task.get("status", 0)
                 status_text = "Завершена" if status == 2 else "Активна"
                 lines.append(f"  - ID: {task_id}, Название: '{title}', Проект: {project_id}, Статус: {status_text}")
-            if len(all_tasks) > 30:
-                lines.append(f"  ... и еще {len(all_tasks) - 30} задач (всего {len(all_tasks)} задач)")
+            lines.append(f"Всего задач в списке: {len(all_tasks)}")
             lines.append("")
             lines.append("КРИТИЧЕСКИ ВАЖНО - ИСПОЛЬЗОВАНИЕ taskId:")
             lines.append("1. Если команда содержит название задачи, НАЙДИ задачу в списке выше по названию")
