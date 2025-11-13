@@ -4,8 +4,10 @@ Data fetcher service for retrieving data from cache and API
 
 import re
 from typing import Optional, Dict, List, Any
+from datetime import datetime, timedelta
 from src.api.ticktick_client import TickTickClient
 from src.services.task_cache import TaskCacheService
+from src.services.project_cache_service import ProjectCacheService
 from src.utils.logger import logger
 
 
@@ -40,7 +42,38 @@ class DataFetcher:
         """
         self.client = ticktick_client
         self.cache = TaskCacheService()
+        self.project_cache = ProjectCacheService(ticktick_client)
         self.logger = logger
+        
+        # Cache for all tasks (TTL: 2 minutes)
+        self._all_tasks_cache: Optional[List[Dict[str, Any]]] = None
+        self._all_tasks_cache_time: Optional[datetime] = None
+        self._all_tasks_cache_ttl = timedelta(minutes=2)
+    
+    async def _get_all_tasks(self) -> List[Dict[str, Any]]:
+        """
+        Get all tasks from all projects (with caching)
+        
+        Returns:
+            List of all tasks
+        """
+        # Check cache
+        if (self._all_tasks_cache is not None and 
+            self._all_tasks_cache_time is not None and
+            datetime.now() - self._all_tasks_cache_time < self._all_tasks_cache_ttl):
+            self.logger.info(f"[DataFetcher] Using cached all tasks ({len(self._all_tasks_cache)} tasks)")
+            return self._all_tasks_cache
+        
+        # Fetch all tasks
+        self.logger.info(f"[DataFetcher] Fetching all tasks from all projects...")
+        all_tasks = await self.client.get_tasks()
+        
+        # Update cache
+        self._all_tasks_cache = all_tasks
+        self._all_tasks_cache_time = datetime.now()
+        self.logger.info(f"[DataFetcher] Cached {len(all_tasks)} tasks (TTL: 2 minutes)")
+        
+        return all_tasks
     
     async def fetch_data_requirements(self, requirements: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -66,7 +99,21 @@ class DataFetcher:
             "projects": {},
             "task_data": {},
             "current_task_data": {},
+            "all_tasks": [],  # Always include all tasks
         }
+        
+        # ALWAYS fetch all tasks first (for GPT context)
+        self.logger.info(f"[DataFetcher] ===== FETCHING ALL TASKS FOR GPT CONTEXT =====")
+        all_tasks = await self._get_all_tasks()
+        fetched_data["all_tasks"] = all_tasks
+        self.logger.info(f"[DataFetcher] Fetched {len(all_tasks)} tasks for GPT context")
+        
+        # Log task titles for debugging
+        if all_tasks:
+            task_titles = [t.get("title", "") for t in all_tasks[:20]]
+            self.logger.info(f"[DataFetcher] Sample task titles (first 20): {task_titles}")
+            if len(all_tasks) > 20:
+                self.logger.info(f"[DataFetcher] ... and {len(all_tasks) - 20} more tasks")
         
         required_data = requirements.get("required_data", {})
         self.logger.debug(f"[DataFetcher] Required data: {required_data}")

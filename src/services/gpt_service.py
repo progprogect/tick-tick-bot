@@ -494,9 +494,27 @@ class GPTService:
         """
         lines = []
         
-        # Format tasks
+        # ALWAYS include all tasks first (for GPT to see all available tasks)
+        all_tasks = fetched_data.get("all_tasks", [])
+        if all_tasks:
+            lines.append("ВСЕ ЗАДАЧИ ПОЛЬЗОВАТЕЛЯ (для справки - используй точные названия из этого списка):")
+            for task in all_tasks[:50]:  # Limit to 50 tasks to avoid token overflow
+                task_id = task.get("id", "N/A")
+                title = task.get("title", "Без названия")
+                project_id = task.get("projectId", "N/A")
+                status = task.get("status", 0)
+                status_text = "Завершена" if status == 2 else "Активна"
+                lines.append(f"  - ID: {task_id}, Название: '{title}', Проект: {project_id}, Статус: {status_text}")
+            if len(all_tasks) > 50:
+                lines.append(f"  ... и еще {len(all_tasks) - 50} задач")
+            lines.append("")
+            lines.append("ВАЖНО: При извлечении названия задачи из команды пользователя, используй ТОЧНОЕ название из списка выше.")
+            lines.append("Если пользователь сказал 'задача X на завтра', ищи задачу с названием 'X', а не 'X на завтра'.")
+            lines.append("")
+        
+        # Format tasks (specific tasks found by title)
         if fetched_data.get("tasks"):
-            lines.append("НАЙДЕННЫЕ ЗАДАЧИ:")
+            lines.append("НАЙДЕННЫЕ ЗАДАЧИ (по запросу):")
             for title, task in fetched_data["tasks"].items():
                 if task:
                     lines.append(f"  - '{title}': {{id: '{task.get('id')}', projectId: '{task.get('projectId')}', title: '{task.get('title')}'}}")
