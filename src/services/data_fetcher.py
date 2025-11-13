@@ -134,7 +134,7 @@ class DataFetcher:
         self._all_tasks_cache_time = datetime.now()
         self.logger.info(
             f"[DataFetcher] Cached {len(all_tasks)} tasks "
-            f"({len(incomplete_tasks)} incomplete + {len(completed_tasks_from_cache)} completed, TTL: 2 minutes)"
+            f"({len(incomplete_tasks)} incomplete from API + {len(tasks_from_cache)} from cache, TTL: 2 minutes)"
         )
         
         return all_tasks
