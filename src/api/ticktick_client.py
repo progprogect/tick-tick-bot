@@ -571,6 +571,37 @@ class TickTickClient(BaseAPIClient):
                             f"closed: {project.get('closed', False)})"
                         )
                     
+                    # First, get tasks from Inbox (Inbox is not in the projects list)
+                    try:
+                        self.logger.debug("[get_tasks] Fetching tasks from Inbox...")
+                        inbox_response = await self.get(
+                            endpoint=f"/open/{TICKTICK_API_VERSION}/project/inbox/data",
+                            headers=self._get_headers(),
+                        )
+                        
+                        if isinstance(inbox_response, dict) and "tasks" in inbox_response:
+                            inbox_tasks = inbox_response["tasks"]
+                            if isinstance(inbox_tasks, list):
+                                all_tasks.extend(inbox_tasks)
+                                self.logger.info(
+                                    f"[get_tasks] Retrieved {len(inbox_tasks)} tasks from Inbox"
+                                )
+                            else:
+                                self.logger.warning(
+                                    f"[get_tasks] Invalid tasks format from Inbox: {type(inbox_tasks)}"
+                                )
+                        else:
+                            self.logger.debug(
+                                f"[get_tasks] No tasks in Inbox response "
+                                f"(response keys: {list(inbox_response.keys()) if isinstance(inbox_response, dict) else 'not a dict'})"
+                            )
+                    except Exception as e:
+                        self.logger.warning(
+                            f"[get_tasks] Failed to get tasks from Inbox: {e}"
+                        )
+                        # Continue even if Inbox fails
+                    
+                    # Then, get tasks from all regular projects
                     for project in projects:
                         project_id_val = project.get("id")
                         project_name = project.get("name", "N/A")
