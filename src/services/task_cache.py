@@ -264,4 +264,116 @@ class TaskCacheService:
                 if project_id is None or task_project_id == project_id:
                     completed_tasks.append((task_id, task_project_id))
         return completed_tasks
+    
+    async def sync_task_from_api(
+        self,
+        task_id: str,
+        project_id: str,
+        client: Any,  # TickTickClient
+    ) -> None:
+        """
+        Synchronize task from API to cache
+        
+        Gets current task data from API and saves to cache
+        
+        Args:
+            task_id: Task ID
+            project_id: Project ID
+            client: TickTickClient instance
+        """
+        try:
+            from src.config.constants import TICKTICK_API_VERSION
+            
+            # Ensure client is authenticated
+            if not hasattr(client, 'access_token') or not client.access_token:
+                await client.authenticate()
+            
+            # Get task from API
+            task = await client.get(
+                endpoint=f"/open/{TICKTICK_API_VERSION}/project/{project_id}/task/{task_id}",
+                headers=client._get_headers(),
+            )
+            
+            if isinstance(task, dict):
+                # Convert API status to cache status
+                api_status = task.get("status", 0)
+                cache_status = "completed" if api_status == 2 else "active"
+                
+                # Save to cache
+                self.save_task(
+                    task_id=task.get("id", task_id),
+                    title=task.get("title", ""),
+                    project_id=task.get("projectId", project_id),
+                    status=cache_status,
+                    tags=task.get("tags", []),
+                    notes=task.get("content", ""),
+                    reminders=task.get("reminders", []),
+                    repeat_flag=task.get("repeatFlag"),
+                )
+                self.logger.info(f"[TaskCache] Synced task {task_id} from API to cache")
+            else:
+                self.logger.warning(f"[TaskCache] Failed to sync task {task_id}: invalid response from API")
+        except Exception as e:
+            self.logger.warning(f"[TaskCache] Failed to sync task {task_id} from API: {e}", exc_info=True)
+    
+    async def bulk_sync_tasks_from_project(
+        self,
+        project_id: str,
+        client: Any,  # TickTickClient
+    ) -> int:
+        """
+        Synchronize all tasks from project to cache
+        
+        Gets all tasks from project using GET /open/v1/project/{projectId}/data
+        and saves them to cache
+        
+        Args:
+            project_id: Project ID
+            client: TickTickClient instance
+            
+        Returns:
+            Number of tasks synchronized
+        """
+        try:
+            from src.config.constants import TICKTICK_API_VERSION
+            
+            # Ensure client is authenticated
+            if not hasattr(client, 'access_token') or not client.access_token:
+                await client.authenticate()
+            
+            # Get project data (includes tasks)
+            response = await client.get(
+                endpoint=f"/open/{TICKTICK_API_VERSION}/project/{project_id}/data",
+                headers=client._get_headers(),
+            )
+            
+            if isinstance(response, dict) and "tasks" in response:
+                tasks = response["tasks"]
+                if isinstance(tasks, list):
+                    count = 0
+                    for task in tasks:
+                        # GET /project/{projectId}/data returns only incomplete tasks (status=0)
+                        self.save_task(
+                            task_id=task.get("id"),
+                            title=task.get("title", ""),
+                            project_id=task.get("projectId", project_id),
+                            status="active",  # Only incomplete tasks are returned
+                            tags=task.get("tags", []),
+                            notes=task.get("content", ""),
+                            reminders=task.get("reminders", []),
+                            repeat_flag=task.get("repeatFlag"),
+                        )
+                        count += 1
+                    
+                    self.logger.info(f"[TaskCache] Synced {count} tasks from project {project_id} to cache")
+                    return count
+                else:
+                    self.logger.warning(f"[TaskCache] Invalid tasks format in response for project {project_id}")
+                    return 0
+            else:
+                self.logger.warning(f"[TaskCache] No tasks in response for project {project_id}")
+                return 0
+        except Exception as e:
+            self.logger.warning(f"[TaskCache] Failed to sync tasks from project {project_id}: {e}", exc_info=True)
+            return 0
 

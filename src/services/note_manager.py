@@ -5,6 +5,8 @@ Note management service
 from src.api.ticktick_client import TickTickClient
 from src.models.command import ParsedCommand
 from src.services.task_cache import TaskCacheService
+from src.services.project_cache_service import ProjectCacheService
+from src.services.task_search_service import TaskSearchService
 from src.utils.logger import logger
 
 
@@ -20,6 +22,8 @@ class NoteManager:
         """
         self.client = ticktick_client
         self.cache = TaskCacheService()
+        self.project_cache = ProjectCacheService(ticktick_client)
+        self.task_search = TaskSearchService(ticktick_client, self.cache, self.project_cache)
         self.logger = logger
     
     async def add_note(self, command: ParsedCommand) -> str:
@@ -37,36 +41,20 @@ class NoteManager:
                 if not command.title:
                     raise ValueError("Не указано название задачи или ID для добавления заметки")
                 
-                # Try to find task by title - first check cache
-                task_id = self.cache.get_task_id_by_title(
+                # Use TaskSearchService to find task
+                task = await self.task_search.find_task_by_title(
                     title=command.title,
                     project_id=command.project_id,
                 )
                 
-                if task_id:
-                    command.task_id = task_id
-                    self.logger.debug(f"Found task ID in cache: {task_id}")
+                if task:
+                    command.task_id = task.get("id")
+                    self.logger.debug(f"Found task ID: {command.task_id}")
                 else:
-                    # Try API (may fail, but try anyway)
-                    tasks = await self.client.get_tasks()
-                    matching_task = next(
-                        (t for t in tasks if t.get("title") == command.title),
-                        None
+                    raise ValueError(
+                        f"Задача '{command.title}' не найдена. "
+                        f"Попробуйте создать новую задачу или укажите ID задачи."
                     )
-                    
-                    if matching_task:
-                        command.task_id = matching_task.get("id")
-                        # Cache it for future use
-                        self.cache.save_task(
-                            task_id=command.task_id,
-                            title=command.title,
-                            project_id=command.project_id or matching_task.get('projectId'),
-                        )
-                    else:
-                        raise ValueError(
-                            f"Задача '{command.title}' не найдена. "
-                            f"Попробуйте создать новую задачу или укажите ID задачи."
-                        )
             
             if not command.notes:
                 raise ValueError("Заметка не указана")

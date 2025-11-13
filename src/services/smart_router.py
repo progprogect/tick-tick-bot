@@ -17,6 +17,8 @@ from src.services.task_modifier import TaskModifier
 from src.services.tag_manager import TagManager
 from src.services.note_manager import NoteManager
 from src.services.task_cache import TaskCacheService
+from src.services.project_cache_service import ProjectCacheService
+from src.services.task_search_service import TaskSearchService
 from src.services.recurring_task_manager import RecurringTaskManager
 from src.services.reminder_manager import ReminderManager
 from src.services.batch_processor import BatchProcessor
@@ -78,6 +80,8 @@ class SmartRouter:
         self.batch_processor = batch_processor
         self.analytics_service = analytics_service
         self.cache = TaskCacheService()
+        self.project_cache = ProjectCacheService(ticktick_client)
+        self.task_search = TaskSearchService(ticktick_client, self.cache, self.project_cache)
         self.logger = logger
     
     async def route(self, command: ParsedCommand) -> str:
@@ -221,26 +225,14 @@ class SmartRouter:
         if identifier.type == "id":
             return identifier.value
         elif identifier.type == "title":
-            task_id = self.cache.get_task_id_by_title(identifier.value)
-            if task_id:
-                return task_id
-            
-            # Fallback to API search
-            tasks = await self.client.get_tasks()
-            matching_task = next(
-                (t for t in tasks if t.get("title") == identifier.value),
-                None
+            # Use TaskSearchService to find task
+            task = await self.task_search.find_task_by_title(
+                title=identifier.value,
+                project_id=None,
             )
             
-            if matching_task:
-                task_id = matching_task.get("id")
-                # Cache it
-                self.cache.save_task(
-                    task_id=task_id,
-                    title=identifier.value,
-                    project_id=matching_task.get('projectId'),
-                )
-                return task_id
+            if task:
+                return task.get("id")
             
             raise ValueError(f"Задача '{identifier.value}' не найдена")
         else:
@@ -450,7 +442,7 @@ class SmartRouter:
         # Update context with created task_id
         # Extract task_id from result or from cache
         if operation.params.get("title"):
-            task_id = self.cache.get_task_id_by_title(operation.params.get("title"))
+            task_id = await self.task_search.find_task_id_by_title(operation.params.get("title"))
             if task_id:
                 context['task_id'] = task_id
         
