@@ -91,24 +91,45 @@ class TaskSearchService:
         
         # Normalize title for search
         search_title_normalized = normalize_title(title)
-        self.logger.debug(
-            f"[TaskSearch] Searching for task: '{title}' "
-            f"(normalized: '{search_title_normalized}', project_id: {project_id})"
+        self.logger.info(
+            f"[TaskSearch] ===== STARTING SEARCH ====="
+        )
+        self.logger.info(
+            f"[TaskSearch] Original title: '{title}'"
+        )
+        self.logger.info(
+            f"[TaskSearch] Normalized title: '{search_title_normalized}'"
+        )
+        self.logger.info(
+            f"[TaskSearch] Project ID: {project_id}"
+        )
+        self.logger.info(
+            f"[TaskSearch] Use cache: {use_cache}, Use API: {use_api}"
         )
         
         # Step 1: Search in cache
         if use_cache:
+            self.logger.info(f"[TaskSearch] Step 1: Searching in cache...")
             task_id = self.cache.get_task_id_by_title(title, project_id)
             if task_id:
                 task_data = self.cache.get_task_data(task_id)
                 if task_data:
-                    self.logger.info(f"[TaskSearch] Found task in cache: {task_id} ('{task_data.get('title')}')")
+                    cached_title = task_data.get('title', '')
+                    self.logger.info(
+                        f"[TaskSearch] ✓ Found task in cache: {task_id} "
+                        f"(title: '{cached_title}', normalized: '{normalize_title(cached_title)}')"
+                    )
                     # Convert cache format to API format
                     return self._cache_to_api_format(task_id, task_data)
+            else:
+                self.logger.info(f"[TaskSearch] ✗ Task not found in cache")
+        else:
+            self.logger.info(f"[TaskSearch] Step 1: Cache search skipped (use_cache=False)")
         
         # Step 2: Search in API
         if not use_api:
-            self.logger.debug("[TaskSearch] API search disabled, returning None")
+            self.logger.info("[TaskSearch] API search disabled, returning None")
+            self.logger.warning(f"[TaskSearch] ===== SEARCH FAILED (API disabled) =====")
             return None
         
         if project_id:
@@ -173,26 +194,49 @@ class TaskSearchService:
                 self.logger.warning(f"[TaskSearch] Invalid tasks format in response for project {project_id}")
                 return None
             
-            self.logger.debug(f"[TaskSearch] Searching in {len(tasks)} tasks from project {project_id}")
+            self.logger.info(f"[TaskSearch] Retrieved {len(tasks)} tasks from project {project_id}")
+            
+            # Log all task titles for debugging
+            if tasks:
+                all_titles = [t.get("title", "") for t in tasks]
+                self.logger.info(f"[TaskSearch] All task titles from API: {all_titles}")
+                normalized_titles = [normalize_title(t) for t in all_titles]
+                self.logger.info(f"[TaskSearch] Normalized task titles: {normalized_titles}")
             
             # Try exact match first
+            self.logger.info(f"[TaskSearch] Trying exact match...")
             matching_task = self._find_exact_match(tasks, search_title_normalized)
             
             # If not found, try partial match
             if not matching_task:
+                self.logger.info(f"[TaskSearch] Exact match not found, trying partial match...")
                 matching_task = self._find_partial_match(tasks, search_title_normalized)
             
             # If found, save to cache and return
             if matching_task:
                 self._save_to_cache(matching_task)
                 self.logger.info(
-                    f"[TaskSearch] Found task in project {project_id}: "
+                    f"[TaskSearch] ✓ Found task in project {project_id}: "
                     f"{matching_task.get('id')} ('{matching_task.get('title')}')"
                 )
+                self.logger.info(f"[TaskSearch] ===== SEARCH SUCCESS =====")
                 return matching_task
             
             # Check completed tasks from cache for this project
-            return await self._check_completed_tasks(project_id, search_title_normalized)
+            self.logger.info(f"[TaskSearch] Checking completed tasks from cache...")
+            completed_task = await self._check_completed_tasks(project_id, search_title_normalized)
+            if completed_task:
+                self.logger.info(f"[TaskSearch] ===== SEARCH SUCCESS (completed task) =====")
+                return completed_task
+            
+            self.logger.warning(
+                f"[TaskSearch] ===== SEARCH FAILED ====="
+            )
+            self.logger.warning(
+                f"[TaskSearch] Task '{original_title}' (normalized: '{search_title_normalized}') "
+                f"not found in project {project_id}"
+            )
+            return None
             
         except Exception as e:
             self.logger.error(f"[TaskSearch] Error searching in project {project_id}: {e}", exc_info=True)
@@ -240,7 +284,13 @@ class TaskSearchService:
                     return matching_task
             
             # Not found in any project
-            self.logger.warning(f"[TaskSearch] Task not found in any project: '{original_title}'")
+            self.logger.warning(
+                f"[TaskSearch] ===== SEARCH FAILED ====="
+            )
+            self.logger.warning(
+                f"[TaskSearch] Task '{original_title}' (normalized: '{search_title_normalized}') "
+                f"not found in any of {len(projects)} projects"
+            )
             return None
             
         except Exception as e:
@@ -266,10 +316,16 @@ class TaskSearchService:
             task_title = task.get("title", "")
             task_title_normalized = normalize_title(task_title)
             
+            self.logger.debug(
+                f"[TaskSearch] Comparing: '{task_title}' (normalized: '{task_title_normalized}') "
+                f"== '{search_title_normalized}'"
+            )
+            
             if task_title_normalized == search_title_normalized:
-                self.logger.debug(f"[TaskSearch] Exact match found: '{task_title}'")
+                self.logger.info(f"[TaskSearch] ✓ Exact match found: '{task_title}'")
                 return task
         
+        self.logger.info(f"[TaskSearch] ✗ Exact match not found")
         return None
     
     def _find_partial_match(
@@ -289,14 +345,23 @@ class TaskSearchService:
         """
         matches = []
         
+        self.logger.info(f"[TaskSearch] Checking partial matches...")
         for task in tasks:
             task_title = task.get("title", "")
             task_title_normalized = normalize_title(task_title)
             
             # Check if search title is contained in task title or vice versa
-            if (search_title_normalized in task_title_normalized or 
-                task_title_normalized in search_title_normalized):
+            contains_search = search_title_normalized in task_title_normalized
+            contains_task = task_title_normalized in search_title_normalized
+            
+            self.logger.debug(
+                f"[TaskSearch] Partial check: '{task_title}' (normalized: '{task_title_normalized}') "
+                f"- search in task: {contains_search}, task in search: {contains_task}"
+            )
+            
+            if contains_search or contains_task:
                 matches.append((task, len(task_title_normalized), task_title))
+                self.logger.debug(f"[TaskSearch] Partial match candidate: '{task_title}'")
         
         if matches:
             # Prefer longer match (more specific)
@@ -304,19 +369,20 @@ class TaskSearchService:
             best_match = matches[0]
             
             self.logger.info(
-                f"[TaskSearch] Partial match found: '{best_match[2]}' "
+                f"[TaskSearch] ✓ Partial match found: '{best_match[2]}' "
                 f"(normalized: '{normalize_title(best_match[2])}') "
                 f"for search '{search_title_normalized}'"
             )
             
             if len(matches) > 1:
                 self.logger.warning(
-                    f"[TaskSearch] Multiple partial matches found: "
+                    f"[TaskSearch] Multiple partial matches found ({len(matches)}): "
                     f"{[m[2] for m in matches]}, using '{best_match[2]}'"
                 )
             
             return best_match[0]
         
+        self.logger.info(f"[TaskSearch] ✗ Partial match not found")
         return None
     
     def _save_to_cache(self, task: Dict[str, Any]) -> None:

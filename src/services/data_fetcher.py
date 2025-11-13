@@ -73,7 +73,9 @@ class DataFetcher:
         
         # Fetch tasks by title
         task_titles = required_data.get("task_by_title", [])
-        self.logger.info(f"[DataFetcher] Fetching {len(task_titles)} tasks by title: {task_titles}")
+        self.logger.info(f"[DataFetcher] ===== FETCHING TASKS BY TITLE =====")
+        self.logger.info(f"[DataFetcher] Task titles to fetch: {task_titles}")
+        self.logger.info(f"[DataFetcher] Number of tasks to fetch: {len(task_titles)}")
         for title in task_titles:
             project_id = required_data.get("project_by_name_for_task", {}).get(title)
             self.logger.debug(f"[DataFetcher] Fetching task '{title}' (project_id: {project_id})")

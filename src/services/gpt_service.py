@@ -58,11 +58,20 @@ class GPTService:
                 raise ValueError("TickTick client not available for data fetching")
             
             # Stage 1: Determine data requirements
-            self.logger.info("[Stage 1] Determining data requirements...")
+            self.logger.info(f"[Stage 1] ===== DETERMINING DATA REQUIREMENTS =====")
+            self.logger.info(f"[Stage 1] Original command: '{command}'")
             requirements = await self.determine_data_requirements(command)
             action_type = requirements.get("action_type", "create_task")
             self.logger.info(f"[Stage 1] Action type determined: {action_type}")
-            self.logger.debug(f"[Stage 1] Requirements: {requirements}")
+            self.logger.info(f"[Stage 1] Requirements: {requirements}")
+            
+            # Log task titles that GPT extracted
+            required_data = requirements.get("required_data", {})
+            task_titles = required_data.get("task_by_title", [])
+            if task_titles:
+                self.logger.info(f"[Stage 1] GPT extracted task titles: {task_titles}")
+            else:
+                self.logger.info(f"[Stage 1] GPT did not extract any task titles")
             
             self.logger.info(f"[Stage 2] Fetching data for requirements...")
             
@@ -112,9 +121,23 @@ class GPTService:
             self.logger.info(f"[Stage 2] Data fetched successfully")
             
             # Stage 3: Parse command with data
+            self.logger.info(f"[Stage 3] ===== PARSING COMMAND WITH DATA =====")
             parsed_command = await self.parse_command_with_data(
                 command, fetched_data, action_type
             )
+            
+            # Log what GPT parsed
+            if parsed_command.title:
+                self.logger.info(f"[Stage 3] GPT parsed task title: '{parsed_command.title}'")
+            if parsed_command.task_id:
+                self.logger.info(f"[Stage 3] GPT parsed task_id: '{parsed_command.task_id}'")
+            if parsed_command.operations:
+                for i, op in enumerate(parsed_command.operations):
+                    if op.task_identifier and op.task_identifier.value:
+                        self.logger.info(
+                            f"[Stage 3] GPT parsed operation {i+1} task identifier: "
+                            f"'{op.task_identifier.value}' (type: {op.task_identifier.type})"
+                        )
             
             self.logger.info(f"[Multi-stage] Command parsing completed successfully")
             
