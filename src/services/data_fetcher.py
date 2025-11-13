@@ -129,13 +129,25 @@ class DataFetcher:
             )
             all_tasks.extend(tasks_from_cache)
         
-        # Sort all tasks by sortOrder across all projects (more negative = newer)
-        # This ensures we get the most recent tasks from ALL projects, not just per project
-        # For tasks from cache without sortOrder, use a default value (0 = oldest)
+        # Sort all tasks by timestamp from ID (more reliable than sortOrder)
+        # ObjectId contains timestamp in first 8 hex characters
+        def get_task_timestamp(task):
+            task_id = task.get("id", "")
+            if task_id and len(task_id) >= 8:
+                try:
+                    # Extract timestamp from first 8 hex chars
+                    hex_timestamp = task_id[:8]
+                    timestamp = int(hex_timestamp, 16)
+                    return timestamp
+                except:
+                    pass
+            # Fallback to sortOrder if ID parsing fails
+            return task.get("sortOrder", 0)
+        
         all_tasks = sorted(
             all_tasks,
-            key=lambda t: t.get("sortOrder", 0),
-            reverse=False  # More negative = newer, so reverse=False gives newest first
+            key=get_task_timestamp,
+            reverse=True  # Higher timestamp = newer task
         )
         self.logger.info(
             f"[DataFetcher] Sorted all {len(all_tasks)} tasks by sortOrder "
