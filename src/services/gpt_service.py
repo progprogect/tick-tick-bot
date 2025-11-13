@@ -459,11 +459,21 @@ class GPTService:
         required_data = requirements.get("required_data", {})
         missing = []
         
-        # Check tasks by title
-        task_titles = required_data.get("task_by_title", [])
-        for title in task_titles:
-            if title not in fetched_data.get("tasks", {}) or fetched_data["tasks"][title] is None:
-                missing.append(f"Задача '{title}'")
+        # Check tasks by title - НЕ проверяем, если есть список всех задач
+        # GPT сам найдет задачу в списке всех задач
+        all_tasks = fetched_data.get("all_tasks", [])
+        if not all_tasks:
+            # Если нет списка всех задач, проверяем как раньше
+            task_titles = required_data.get("task_by_title", [])
+            for title in task_titles:
+                if title not in fetched_data.get("tasks", {}) or fetched_data["tasks"][title] is None:
+                    missing.append(f"Задача '{title}'")
+        else:
+            # Если есть список всех задач, GPT сам найдет задачу - не проверяем
+            self.logger.info(
+                f"[CheckMissingData] Skipping task check - GPT will find task in all_tasks list "
+                f"({len(all_tasks)} tasks available)"
+            )
         
         # Check projects by name
         project_names = required_data.get("project_by_name", [])
@@ -497,19 +507,24 @@ class GPTService:
         # ALWAYS include all tasks first (for GPT to see all available tasks)
         all_tasks = fetched_data.get("all_tasks", [])
         if all_tasks:
-            lines.append("ВСЕ ЗАДАЧИ ПОЛЬЗОВАТЕЛЯ (для справки - используй точные названия из этого списка):")
-            for task in all_tasks[:50]:  # Limit to 50 tasks to avoid token overflow
+            lines.append("ВСЕ ЗАДАЧИ ПОЛЬЗОВАТЕЛЯ (ОБЯЗАТЕЛЬНО используй этот список для поиска задач):")
+            for task in all_tasks[:100]:  # Увеличил до 100 задач
                 task_id = task.get("id", "N/A")
                 title = task.get("title", "Без названия")
                 project_id = task.get("projectId", "N/A")
                 status = task.get("status", 0)
                 status_text = "Завершена" if status == 2 else "Активна"
                 lines.append(f"  - ID: {task_id}, Название: '{title}', Проект: {project_id}, Статус: {status_text}")
-            if len(all_tasks) > 50:
-                lines.append(f"  ... и еще {len(all_tasks) - 50} задач")
+            if len(all_tasks) > 100:
+                lines.append(f"  ... и еще {len(all_tasks) - 100} задач")
             lines.append("")
-            lines.append("ВАЖНО: При извлечении названия задачи из команды пользователя, используй ТОЧНОЕ название из списка выше.")
-            lines.append("Если пользователь сказал 'задача X на завтра', ищи задачу с названием 'X', а не 'X на завтра'.")
+            lines.append("КРИТИЧЕСКИ ВАЖНО:")
+            lines.append("1. Если команда содержит название задачи (например, 'Перенеси задачу X на завтра'),")
+            lines.append("   ОБЯЗАТЕЛЬНО найди задачу в списке выше по названию (игнорируя слова 'на завтра', 'на 8:00' и т.д.)")
+            lines.append("2. Используй ТОЧНОЕ название из списка (регистр и пробелы могут отличаться - ищи похожее)")
+            lines.append("3. Если нашел задачу - используй её ID в поле taskId или task_identifier.value")
+            lines.append("4. Если пользователь сказал 'задача X на завтра', ищи задачу с названием 'X' в списке, а не 'X на завтра'")
+            lines.append("5. Для поиска используй частичное совпадение - если название похоже, это нужная задача")
             lines.append("")
         
         # Format tasks (specific tasks found by title)
