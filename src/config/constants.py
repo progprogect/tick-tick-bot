@@ -35,4 +35,8 @@ VOICE_SUPPORTED_FORMATS = ["ogg", "mp3", "m4a", "wav"]
 LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 LOG_DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 
+# Timezone
+USER_TIMEZONE_OFFSET = 3  # UTC+3 (hours)
+USER_TIMEZONE_STR = "+03:00"  # ISO format
+
 

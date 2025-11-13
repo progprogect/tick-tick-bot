@@ -4,10 +4,10 @@ TickTick API client
 
 import base64
 from typing import Optional, Dict, Any, List
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from src.api.base_client import BaseAPIClient
 from src.config.settings import settings
-from src.config.constants import TICKTICK_API_BASE_URL, TICKTICK_API_VERSION
+from src.config.constants import TICKTICK_API_BASE_URL, TICKTICK_API_VERSION, USER_TIMEZONE_OFFSET, USER_TIMEZONE_STR
 from src.utils.logger import logger
 
 
@@ -16,27 +16,51 @@ def _format_date_for_ticktick(date_str: str) -> str:
     Format date string to TickTick API format: "yyyy-MM-dd'T'HH:mm:ssZ"
     Example: "2019-11-13T03:00:00+0000"
     
+    ВАЖНО: Все время интерпретируется как UTC+3 (локальное время пользователя).
+    При отправке в API конвертируется в UTC.
+    
     Args:
         date_str: Date string in ISO format or other formats
         
     Returns:
-        Formatted date string for TickTick API
+        Formatted date string for TickTick API (в UTC)
     """
     if not date_str:
         return ""
     
     try:
+        # Create UTC+3 timezone
+        user_tz = timezone(timedelta(hours=USER_TIMEZONE_OFFSET))
+        
         # Try to parse ISO format
         if "T" in date_str:
             # Already has time component
-            dt = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
+            # Try to parse with timezone
+            try:
+                dt = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
+            except ValueError:
+                # If parsing fails, try without timezone
+                dt = datetime.fromisoformat(date_str)
+                # If naive datetime, assume it's in UTC+3 (user's local time)
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=user_tz)
         else:
-            # Date only, assume midnight
+            # Date only, assume midnight in UTC+3
             dt = datetime.fromisoformat(date_str)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=user_tz)
         
-        # Format to TickTick API format: "yyyy-MM-dd'T'HH:mm:ssZ"
-        # Remove microseconds and format with timezone
-        formatted = dt.strftime("%Y-%m-%dT%H:%M:%S+0000")
+        # If datetime has timezone info, convert to UTC
+        # If no timezone, it's already in user_tz (UTC+3)
+        if dt.tzinfo is not None:
+            # Convert to UTC
+            dt_utc = dt.astimezone(timezone.utc)
+        else:
+            # Should not happen after our checks, but just in case
+            dt_utc = dt.replace(tzinfo=user_tz).astimezone(timezone.utc)
+        
+        # Format to TickTick API format: "yyyy-MM-dd'T'HH:mm:ss+0000" (UTC)
+        formatted = dt_utc.strftime("%Y-%m-%dT%H:%M:%S+0000")
         return formatted
     except Exception as e:
         logger.warning(f"Failed to format date '{date_str}': {e}")
