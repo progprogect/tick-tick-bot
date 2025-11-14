@@ -27,6 +27,7 @@ class PromptManager:
 - list_tasks: Просмотр задач (для запросов типа "что у меня на сегодня", "покажи мои задачи")
 - bulk_move: Массовый перенос задач
 - bulk_add_tags: Массовое добавление тегов
+- create_project: Создание нового проекта/списка (например, "Создай список Работа", "Создай проект Личное")
 
 ФОРМАТ ОТВЕТА:
 
@@ -45,7 +46,11 @@ class PromptManager:
   "reminder": "дата и время в ISO 8601 с timezone UTC+3 (например, '2025-11-08T10:00:00+03:00')",
   "period": "week|month|year|today|tomorrow",
   "startDate": "начальная дата для фильтрации в ISO 8601 с timezone UTC+3",
-  "endDate": "конечная дата для фильтрации в ISO 8601 с timezone UTC+3"
+  "endDate": "конечная дата для фильтрации в ISO 8601 с timezone UTC+3",
+  "projectName": "название проекта (обязательно для create_project)",
+  "projectColor": "цвет проекта (опционально, например, '#F18181')",
+  "projectViewMode": "режим отображения (опционально: 'list', 'kanban', 'timeline')",
+  "projectKind": "тип проекта (опционально: 'TASK', 'NOTE')"
 }
 
 Для сложных команд (несколько операций) - используй новый формат:
@@ -256,6 +261,9 @@ class PromptManager:
 - "Создай задачу просто тестовая задача в списке Работа" → {"action": "create_task", "title": "просто тестовая задача", "projectId": "inbox123456"}
 - "Добавь задачу Y в проекте Личное" → {"action": "create_task", "title": "Y", "projectId": "inbox789012"}
 - "Создай задачу купить молоко в списке Покупки" → {"action": "create_task", "title": "купить молоко", "projectId": "ID_ПРОЕКТА_ПОКУПКИ_ИЗ_КОНТЕКСТА"} (найди ID проекта "Покупки" в контексте)
+- "Создай список Работа" → {"action": "create_project", "projectName": "Работа"}
+- "Создай проект Личное" → {"action": "create_project", "projectName": "Личное"}
+- "Создай список Покупки" → {"action": "create_project", "projectName": "Покупки"}
 - "Перенеси задачу Z в список Работа" → {"action": "move_task", "title": "Z", "targetProjectId": "inbox123456"}
 
 ВАЖНО - РАСПОЗНАВАНИЕ УКАЗАНИЯ СПИСКА:

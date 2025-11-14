@@ -23,6 +23,7 @@ from src.services.recurring_task_manager import RecurringTaskManager
 from src.services.reminder_manager import ReminderManager
 from src.services.batch_processor import BatchProcessor
 from src.services.analytics_service import AnalyticsService
+from src.services.project_manager import ProjectManager
 from src.utils.logger import logger
 
 
@@ -55,6 +56,7 @@ class SmartRouter:
         reminder_manager: ReminderManager,
         batch_processor: BatchProcessor,
         analytics_service: AnalyticsService,
+        project_manager: ProjectManager,
     ):
         """
         Initialize smart router
@@ -69,6 +71,7 @@ class SmartRouter:
             reminder_manager: Reminder manager
             batch_processor: Batch processor
             analytics_service: Analytics service
+            project_manager: Project manager
         """
         self.client = ticktick_client
         self.task_manager = task_manager
@@ -79,6 +82,7 @@ class SmartRouter:
         self.reminder_manager = reminder_manager
         self.batch_processor = batch_processor
         self.analytics_service = analytics_service
+        self.project_manager = project_manager
         self.cache = TaskCacheService()
         self.project_cache = ProjectCacheService(ticktick_client)
         self.task_search = TaskSearchService(ticktick_client, self.cache, self.project_cache)
@@ -314,6 +318,9 @@ class SmartRouter:
         elif group.type == ActionType.OPTIMIZE_SCHEDULE:
             # Optimize schedule operations are single by nature
             return await self._execute_optimize_schedule(group.operations[0], context)
+        elif group.type == ActionType.CREATE_PROJECT:
+            # Create project operations are single by nature
+            return await self._execute_create_project(group.operations[0], context)
         else:
             raise ValueError(f"Unknown operation type: {group.type}")
     
@@ -698,6 +705,30 @@ class SmartRouter:
     ) -> str:
         """Execute optimize_schedule operation"""
         return await self.analytics_service.optimize_schedule()
+    
+    async def _execute_create_project(
+        self,
+        operation: Operation,
+        context: Dict[str, Any],
+    ) -> str:
+        """Execute create_project operation"""
+        from src.models.command import ParsedCommand
+        
+        command = ParsedCommand(
+            action=ActionType.CREATE_PROJECT,
+            project_name=operation.params.get("projectName"),
+            project_color=operation.params.get("projectColor"),
+            project_view_mode=operation.params.get("projectViewMode"),
+            project_kind=operation.params.get("projectKind"),
+        )
+        
+        result = await self.project_manager.create_project(command)
+        
+        # Note: project_id is not needed in context for create_project
+        # as it's a standalone operation that doesn't depend on other operations
+        # The result message already contains the project ID
+        
+        return result
     
     async def _route_legacy(self, command: ParsedCommand) -> str:
         """

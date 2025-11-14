@@ -22,6 +22,7 @@ class ActionType(str, Enum):
     BULK_MOVE = "bulk_move"
     BULK_ADD_TAGS = "bulk_add_tags"
     LIST_TASKS = "list_tasks"  # Просмотр задач
+    CREATE_PROJECT = "create_project"  # Создание проекта
 
 
 class FieldModifier(str, Enum):
@@ -89,6 +90,11 @@ class ParsedCommand(BaseModel):
     limit: Optional[int] = None  # Limit number of tasks to show
     sort_by: Optional[str] = Field(None, alias="sortBy")  # "createdTime", "dueDate", etc.
     error: Optional[str] = None
+    # Project fields
+    project_name: Optional[str] = Field(None, alias="projectName")  # Название проекта
+    project_color: Optional[str] = Field(None, alias="projectColor")  # Цвет проекта
+    project_view_mode: Optional[str] = Field(None, alias="projectViewMode")  # Режим отображения: "list", "kanban", "timeline"
+    project_kind: Optional[str] = Field(None, alias="projectKind")  # Тип проекта: "TASK", "NOTE"
     
     def is_composite(self) -> bool:
         """Check if command uses new composite format"""

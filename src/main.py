@@ -17,6 +17,7 @@ from src.services.note_manager import NoteManager
 from src.services.recurring_task_manager import RecurringTaskManager
 from src.services.reminder_manager import ReminderManager
 from src.services.analytics_service import AnalyticsService
+from src.services.project_manager import ProjectManager
 from src.services.smart_router import SmartRouter
 from src.models.command import ActionType
 from src.utils.logger import logger
@@ -43,6 +44,7 @@ class TickTickBot:
         self.recurring_task_manager = RecurringTaskManager(self.ticktick_client)
         self.reminder_manager = ReminderManager(self.ticktick_client)
         self.analytics_service = AnalyticsService(self.ticktick_client, self.gpt_service)
+        self.project_manager = ProjectManager(self.ticktick_client)
         
         # Smart router for composite commands
         self.smart_router = SmartRouter(
@@ -55,6 +57,7 @@ class TickTickBot:
             reminder_manager=self.reminder_manager,
             batch_processor=self.batch_processor,
             analytics_service=self.analytics_service,
+            project_manager=self.project_manager,
         )
         
         self.logger = logger
@@ -230,6 +233,9 @@ class TickTickBot:
                     limit=command.limit,
                     sort_by=command.sort_by,
                 )
+            
+            elif action == ActionType.CREATE_PROJECT:
+                return await self.project_manager.create_project(command)
             
             else:
                 return f"Действие '{action}' пока не реализовано. Используйте /help для списка доступных команд."
