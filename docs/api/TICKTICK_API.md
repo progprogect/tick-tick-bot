@@ -296,6 +296,7 @@ Authorization: Bearer {{token}}
 | Body | `priority` | Приоритет задачи | ❌ |
 | Body | `sortOrder` | Порядок сортировки | ❌ |
 | Body | `items` | Список подзадач | ❌ |
+| Body | `columnId` | ID колонки (секции) для Kanban проектов | ❌ |
 
 **Важно:** При обновлении задачи **ОБЯЗАТЕЛЬНО** нужно передавать `id` и `projectId` в теле запроса!
 
@@ -321,7 +322,8 @@ Authorization: Bearer {{token}}
   "id": "{{taskId}}",
   "projectId": "{{projectId}}",
   "title": "Task Title",
-  "priority": 1
+  "priority": 1,
+  "columnId": "{{columnId}}"
 }
 ```
 
@@ -814,6 +816,87 @@ Authorization: Bearer {{token}}
 
 ---
 
+## Работа с колонками (секциями Kanban)
+
+### Получение колонок проекта
+
+Колонки (секции) доступны только для проектов с `viewMode: "kanban"`. Для получения колонок используйте:
+
+**GET** `/open/v1/project/{projectId}/data`
+
+Этот endpoint возвращает объект `ProjectData`, который содержит:
+- `project` - информация о проекте
+- `tasks` - список задач проекта
+- `columns` - список колонок (секций) проекта
+
+**Пример ответа с колонками:**
+
+```json
+{
+  "project": {
+    "id": "6226ff9877acee87727f6bca",
+    "name": "Kanban Project",
+    "viewMode": "kanban"
+  },
+  "tasks": [...],
+  "columns": [
+    {
+      "id": "6226ff9e76e5fc39f2862d1b",
+      "projectId": "6226ff9877acee87727f6bca",
+      "name": "В процессе",
+      "sortOrder": 0
+    },
+    {
+      "id": "6226ff9e76e5fc39f2862d1c",
+      "projectId": "6226ff9877acee87727f6bca",
+      "name": "Готово",
+      "sortOrder": 1
+    }
+  ]
+}
+```
+
+### Перенос задачи в колонку
+
+Для переноса задачи в колонку (секцию) используйте поле `columnId` при обновлении задачи:
+
+**POST** `/open/v1/task/{taskId}`
+
+**Пример запроса для переноса в колонку:**
+
+```http
+POST /open/v1/task/{{taskId}} HTTP/1.1
+Host: api.ticktick.com
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "id": "{{taskId}}",
+  "projectId": "{{projectId}}",
+  "columnId": "6226ff9e76e5fc39f2862d1b"
+}
+```
+
+**Важно:**
+- `columnId` работает только для проектов с `viewMode: "kanban"`
+- Колонка должна существовать в проекте (проверьте через `GET /open/v1/project/{projectId}/data`)
+- API принимает и возвращает `columnId` в ответе, подтверждая успешное обновление
+- Если проект не в режиме Kanban, `columnId` может быть проигнорирован
+
+**Пример ответа с columnId:**
+
+```json
+{
+  "id": "63b7bebb91c0a5474805fcd4",
+  "projectId": "6226ff9877acee87727f6bca",
+  "columnId": "6226ff9e76e5fc39f2862d1b",
+  "title": "Task Title",
+  "status": 0
+}
+```
+
+---
+
 ## Важные замечания
 
 ### 1. Получение задач
@@ -958,4 +1041,6 @@ yyyy-MM-dd'T'HH:mm:ssZ
 **Дата создания документации:** 2024-11-04  
 **Версия API:** v1  
 **Последнее обновление:** 2024-11-04
+
+
 

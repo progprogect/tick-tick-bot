@@ -78,6 +78,8 @@ class ParsedCommand(BaseModel):
     task_id: Optional[str] = Field(None, alias="taskId")
     project_id: Optional[str] = Field(None, alias="projectId")
     target_project_id: Optional[str] = Field(None, alias="targetProjectId")
+    column_id: Optional[str] = Field(None, alias="columnId")
+    target_column_id: Optional[str] = Field(None, alias="targetColumnId")
     due_date: Optional[str] = Field(None, alias="dueDate")
     priority: Optional[int] = None
     tags: Optional[List[str]] = None

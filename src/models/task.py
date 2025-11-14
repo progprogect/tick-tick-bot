@@ -15,6 +15,7 @@ class Task(BaseModel):
     id: Optional[str] = None
     title: str
     project_id: Optional[str] = Field(None, alias="projectId")
+    column_id: Optional[str] = Field(None, alias="columnId")
     due_date: Optional[str] = Field(None, alias="dueDate")
     priority: int = 0  # 0: None, 1: Low, 2: Medium, 3: High
     status: int = 0  # 0: Incomplete, 1: Completed
@@ -44,6 +45,7 @@ class TaskUpdate(BaseModel):
     
     title: Optional[str] = None
     project_id: Optional[str] = Field(None, alias="projectId")
+    column_id: Optional[str] = Field(None, alias="columnId")
     due_date: Optional[str] = Field(None, alias="dueDate")
     priority: Optional[int] = None
     status: Optional[int] = None

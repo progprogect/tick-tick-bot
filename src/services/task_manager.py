@@ -30,6 +30,7 @@ from src.utils.logger import logger
 from src.utils.date_parser import parse_date
 from src.services.task_cache import TaskCacheService
 from src.services.project_cache_service import ProjectCacheService
+from src.services.column_cache_service import ColumnCacheService
 from src.services.task_search_service import TaskSearchService
 from src.utils.formatters import (
     format_task_created,
@@ -52,6 +53,7 @@ class TaskManager:
         self.client = ticktick_client
         self.cache = TaskCacheService()
         self.project_cache = ProjectCacheService(ticktick_client)
+        self.column_cache = ColumnCacheService(ticktick_client)
         self.task_search = TaskSearchService(ticktick_client, self.cache, self.project_cache)
         self.logger = logger
         
@@ -165,6 +167,52 @@ class TaskManager:
             
         except Exception as e:
             self.logger.error(f"Failed to resolve project '{project_identifier}': {e}", exc_info=True)
+            return None
+    
+    async def _resolve_column_id(self, project_id: str, column_identifier: Optional[str]) -> Optional[str]:
+        """
+        Resolve column identifier (name or ID) to column ID
+        
+        Args:
+            project_id: Project ID (required for column lookup)
+            column_identifier: Column name or ID
+            
+        Returns:
+            Column ID or None if not found
+        """
+        if not column_identifier:
+            self.logger.debug("No column identifier provided")
+            return None
+        
+        if not project_id:
+            self.logger.warning("Project ID is required for column resolution")
+            return None
+        
+        self.logger.debug(f"Resolving column identifier: '{column_identifier}' in project '{project_id}'")
+        
+        # Check if it looks like an ID (UUID-like or long string)
+        if len(column_identifier) > 20:
+            self.logger.debug(f"Column identifier '{column_identifier}' looks like an ID, returning as is")
+            return column_identifier
+        
+        # Otherwise, it's likely a column name - search for it
+        try:
+            column = await self.column_cache.find_column_by_name(project_id, column_identifier)
+            
+            if column:
+                column_id = column.get('id')
+                column_name = column.get('name', column_identifier)
+                self.logger.info(f"✓ Column resolved: '{column_identifier}' -> '{column_name}' (ID: {column_id})")
+                return column_id
+            else:
+                self.logger.warning(
+                    f"Column '{column_identifier}' not found in project '{project_id}'. "
+                    f"Available columns: {[c.get('name', '') for c in await self.column_cache.get_columns(project_id)]}"
+                )
+                return None
+                
+        except Exception as e:
+            self.logger.error(f"Failed to resolve column '{column_identifier}': {e}", exc_info=True)
             return None
     
     async def create_task(self, command: ParsedCommand) -> str:
@@ -509,10 +557,10 @@ class TaskManager:
     
     async def move_task(self, command: ParsedCommand) -> str:
         """
-        Move task to different project/list
+        Move task to different project/list or column/section
         
         Args:
-            command: Parsed command with task ID and target project
+            command: Parsed command with task ID and target project/column
             
         Returns:
             Success message
@@ -538,46 +586,6 @@ class TaskManager:
                         f"Создайте задачу через бота или используйте task_id."
                     )
             
-            if not command.target_project_id:
-                raise ValueError("Целевой список не указан")
-            
-            self.logger.debug(
-                f"Moving task: task_id='{command.task_id}', "
-                f"target_project_id from command='{command.target_project_id}'"
-            )
-            
-            # Resolve target project_id (name or ID)
-            original_target_project_id = command.target_project_id
-            target_project_id = await self._resolve_project_id(command.target_project_id)
-            
-            # Log project resolution result
-            if target_project_id:
-                self.logger.info(f"✓ Target project resolved: '{original_target_project_id}' -> '{target_project_id}'")
-            else:
-                self.logger.error(
-                    f"✗ Failed to resolve target project: '{original_target_project_id}'. "
-                    f"This might be a placeholder returned by GPT instead of real ID."
-                )
-                raise ValueError(f"Список '{original_target_project_id}' не найден. Проверьте правильность названия или создайте список сначала.")
-            
-            # Verify target project exists
-            try:
-                projects = await self.client.get_projects()
-                target_project = next((p for p in projects if p.get('id') == target_project_id), None)
-                if not target_project:
-                    self.logger.error(
-                        f"✗ Target project ID '{target_project_id}' not found in projects list. "
-                        f"Available projects: {[p.get('name', '') for p in projects[:5]]}"
-                    )
-                    raise ValueError(f"Целевой список '{target_project_id}' не найден. Проверьте правильность ID или создайте список сначала.")
-                self.logger.debug(f"Target project verified: {target_project.get('name', target_project_id)}")
-            except ValueError:
-                # Re-raise ValueError as-is
-                raise
-            except Exception as verify_error:
-                self.logger.error(f"Error verifying target project: {verify_error}", exc_info=True)
-                raise ValueError(f"Не удалось проверить существование целевого списка: {verify_error}")
-            
             # Get current task data
             current_task_info = self.cache.get_task_data(command.task_id)
             if not current_task_info:
@@ -587,40 +595,172 @@ class TaskManager:
             if not current_project_id:
                 raise ValueError(f"Не найден project_id для задачи {command.task_id}")
             
-            # Try to move via update_task first (direct API call)
-            try:
-                task_data = await self.client.update_task(
-                    task_id=command.task_id,
-                    project_id=target_project_id,
+            # Check if moving to column (section) within same project
+            if command.target_column_id and not command.target_project_id:
+                # Moving to column in current project
+                return await self._move_task_to_column(command, current_project_id)
+            
+            # Check if moving to project (and optionally column)
+            if command.target_project_id:
+                return await self._move_task_to_project(command, current_project_id)
+            
+            # If only column_id is specified, use current project
+            if command.target_column_id:
+                return await self._move_task_to_column(command, current_project_id)
+            
+            raise ValueError("Не указан целевой список или секция для переноса")
+    
+    async def _move_task_to_column(self, command: ParsedCommand, project_id: str) -> str:
+        """
+        Move task to a column (section) within a project
+        
+        Args:
+            command: Parsed command with task_id and target_column_id
+            project_id: Project ID where the task is located
+            
+        Returns:
+            Success message
+        """
+        # Resolve column_id
+        original_target_column_id = command.target_column_id
+        target_column_id = await self._resolve_column_id(project_id, command.target_column_id)
+        
+        if not target_column_id:
+            raise ValueError(f"Секция '{original_target_column_id}' не найдена в проекте. Проверьте правильность названия.")
+        
+        # Get column info for response
+        columns = await self.column_cache.get_columns(project_id)
+        target_column = next((c for c in columns if c.get('id') == target_column_id), None)
+        column_name = target_column.get('name', original_target_column_id) if target_column else original_target_column_id
+        
+        # Update task with columnId
+        task_data = await self.client.update_task(
+            task_id=command.task_id,
+            column_id=target_column_id,
+        )
+        
+        self.logger.info(f"Task moved to column: {command.task_id} -> {target_column_id} ({column_name})")
+        
+        # Get current task info for cache update
+        current_task_info = self.cache.get_task_data(command.task_id)
+        
+        # Update cache with column_id
+        self.cache.save_task(
+            task_id=command.task_id,
+            title=command.title or (current_task_info.get('title', '') if current_task_info else ''),
+            project_id=project_id,
+            column_id=target_column_id,
+            status=current_task_info.get('status', 'active') if current_task_info else 'active',
+        )
+        
+        return f"✓ Задача перемещена в секцию '{column_name}'"
+    
+    async def _move_task_to_project(self, command: ParsedCommand, current_project_id: str) -> str:
+        """
+        Move task to a different project (and optionally column)
+        
+        Args:
+            command: Parsed command with task_id, target_project_id, and optionally target_column_id
+            current_project_id: Current project ID where the task is located
+            
+        Returns:
+            Success message
+        """
+        if not command.target_project_id:
+            raise ValueError("Целевой список не указан")
+        
+        self.logger.debug(
+            f"Moving task: task_id='{command.task_id}', "
+            f"target_project_id from command='{command.target_project_id}'"
+        )
+        
+        # Resolve target project_id (name or ID)
+        original_target_project_id = command.target_project_id
+        target_project_id = await self._resolve_project_id(command.target_project_id)
+        
+        # Log project resolution result
+        if target_project_id:
+            self.logger.info(f"✓ Target project resolved: '{original_target_project_id}' -> '{target_project_id}'")
+        else:
+            self.logger.error(
+                f"✗ Failed to resolve target project: '{original_target_project_id}'. "
+                f"This might be a placeholder returned by GPT instead of real ID."
+            )
+            raise ValueError(f"Список '{original_target_project_id}' не найден. Проверьте правильность названия или создайте список сначала.")
+        
+        # Verify target project exists
+        try:
+            projects = await self.client.get_projects()
+            target_project = next((p for p in projects if p.get('id') == target_project_id), None)
+            if not target_project:
+                self.logger.error(
+                    f"✗ Target project ID '{target_project_id}' not found in projects list. "
+                    f"Available projects: {[p.get('name', '') for p in projects[:5]]}"
                 )
-                self.logger.info(f"Task moved via update_task: {command.task_id} -> {target_project_id}")
+                raise ValueError(f"Целевой список '{target_project_id}' не найден. Проверьте правильность ID или создайте список сначала.")
+            self.logger.debug(f"Target project verified: {target_project.get('name', target_project_id)}")
+        except ValueError:
+            # Re-raise ValueError as-is
+            raise
+        except Exception as verify_error:
+            self.logger.error(f"Error verifying target project: {verify_error}", exc_info=True)
+            raise ValueError(f"Не удалось проверить существование целевого списка: {verify_error}")
+        
+        # Resolve target column_id if specified
+        target_column_id = None
+        if command.target_column_id:
+            target_column_id = await self._resolve_column_id(target_project_id, command.target_column_id)
+            if not target_column_id:
+                self.logger.warning(f"Column '{command.target_column_id}' not found in target project, moving without column")
+        
+        # Try to move via update_task first (direct API call)
+        try:
+            update_params = {"task_id": command.task_id, "project_id": target_project_id}
+            if target_column_id:
+                update_params["column_id"] = target_column_id
+            
+            task_data = await self.client.update_task(**update_params)
+            self.logger.info(f"Task moved via update_task: {command.task_id} -> {target_project_id}")
+            
+            # Wait a bit and verify move
+            import asyncio
+            await asyncio.sleep(2)
+            
+            # Verify move by checking target project
+            try:
+                target_tasks = await self.client.get_tasks(project_id=target_project_id)
+                task_moved = any(t.get('id') == command.task_id for t in target_tasks)
                 
-                # Wait a bit and verify move
-                import asyncio
-                await asyncio.sleep(2)
-                
-                # Verify move by checking target project
-                try:
-                    target_tasks = await self.client.get_tasks(project_id=target_project_id)
-                    task_moved = any(t.get('id') == command.task_id for t in target_tasks)
+                if task_moved:
+                    # Update cache with new project_id and column_id
+                    project_name = target_project.get('name', target_project_id) if target_project else target_project_id
+                    current_task_info = self.cache.get_task_data(command.task_id)
                     
-                    if task_moved:
-                        # Update cache with new project_id
-                        project_name = target_project.get('name', target_project_id) if target_project else target_project_id
-                        self.cache.save_task(
-                            task_id=command.task_id,
-                            title=current_task_info.get('title', ''),
-                            project_id=target_project_id,
-                            status=current_task_info.get('status', 'active'),
-                        )
-                        return f"✓ Задача перемещена в список {project_name}"
+                    cache_params = {
+                        "task_id": command.task_id,
+                        "title": current_task_info.get('title', '') if current_task_info else '',
+                        "project_id": target_project_id,
+                        "status": current_task_info.get('status', 'active') if current_task_info else 'active',
+                    }
+                    if target_column_id:
+                        cache_params["column_id"] = target_column_id
+                    
+                    self.cache.save_task(**cache_params)
+                    
+                    if target_column_id:
+                        columns = await self.column_cache.get_columns(target_project_id)
+                        target_column = next((c for c in columns if c.get('id') == target_column_id), None)
+                        column_name = target_column.get('name', '') if target_column else ''
+                        return f"✓ Задача перемещена в список {project_name}, секция '{column_name}'"
                     else:
-                        # Move didn't work, use fallback
-                        self.logger.warning(f"update_task didn't move task, using fallback method")
-                        raise ValueError("Move via update_task failed")
-                except Exception as verify_error:
-                    self.logger.warning(f"Could not verify move: {verify_error}, using fallback")
-                    raise ValueError("Move verification failed")
+                        return f"✓ Задача перемещена в список {project_name}"
+                else:
+                    # Move didn't work, use fallback
+                    self.logger.warning(f"update_task didn't move task, using fallback method")
+                    raise ValueError("Move via update_task failed")
+            except Exception as verify_error:
+                self.logger.warning(f"Could not verify move: {verify_error}, using fallback")
+                raise ValueError("Move verification failed")
                     
             except Exception as update_error:
                 # Fallback: create new task in target project and delete old one
@@ -665,19 +805,37 @@ class TaskManager:
                     self.logger.warning(f"Could not delete old task: {delete_error}")
                     # Continue anyway - task was created in new project
                 
+                # If target_column_id specified, update the new task with column
+                if target_column_id:
+                    await self.client.update_task(
+                        task_id=new_task_id,
+                        column_id=target_column_id,
+                    )
+                
                 # Update cache: remove old, add new with mapping
                 self.cache._cache.pop(command.task_id, None)
-                self.cache.save_task(
-                    task_id=new_task_id,
-                    title=new_task_data.get('title', ''),
-                    project_id=target_project_id,
-                    status='active',
-                    original_task_id=command.task_id,  # Save mapping for reference
-                )
+                cache_params = {
+                    "task_id": new_task_id,
+                    "title": new_task_data.get('title', ''),
+                    "project_id": target_project_id,
+                    "status": 'active',
+                    "original_task_id": command.task_id,  # Save mapping for reference
+                }
+                if target_column_id:
+                    cache_params["column_id"] = target_column_id
+                
+                self.cache.save_task(**cache_params)
                 
                 project_name = target_project.get('name', target_project_id) if target_project else target_project_id
                 self.logger.info(f"Task moved via create+delete: {command.task_id} -> {new_task_id} (in {target_project_id})")
-                return f"✓ Задача перемещена в список {project_name} (новая задача: {new_task_id})"
+                
+                if target_column_id:
+                    columns = await self.column_cache.get_columns(target_project_id)
+                    target_column = next((c for c in columns if c.get('id') == target_column_id), None)
+                    column_name = target_column.get('name', '') if target_column else ''
+                    return f"✓ Задача перемещена в список {project_name}, секция '{column_name}' (новая задача: {new_task_id})"
+                else:
+                    return f"✓ Задача перемещена в список {project_name} (новая задача: {new_task_id})"
             
         except ValueError:
             raise

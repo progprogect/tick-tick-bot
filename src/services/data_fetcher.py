@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 from src.api.ticktick_client import TickTickClient
 from src.services.task_cache import TaskCacheService
 from src.services.project_cache_service import ProjectCacheService
+from src.services.column_cache_service import ColumnCacheService
 from src.utils.logger import logger
 
 
@@ -43,6 +44,7 @@ class DataFetcher:
         self.client = ticktick_client
         self.cache = TaskCacheService()
         self.project_cache = ProjectCacheService(ticktick_client)
+        self.column_cache = ColumnCacheService(ticktick_client)
         self.logger = logger
         
         # Cache for all tasks (TTL: 2 minutes)
@@ -191,6 +193,7 @@ class DataFetcher:
         fetched_data = {
             "tasks": {},
             "projects": {},
+            "columns": {},
             "task_data": {},
             "current_task_data": {},
             "all_tasks": [],  # Always include all tasks
@@ -240,6 +243,38 @@ class DataFetcher:
             else:
                 fetched_data["projects"][name] = None
                 self.logger.warning(f"[DataFetcher] Project '{name}' not found")
+        
+        # Fetch columns by name (requires project_id)
+        column_names = required_data.get("column_by_name", [])
+        if column_names:
+            self.logger.info(f"[DataFetcher] Fetching {len(column_names)} columns by name: {column_names}")
+            # Need to get project_id first - try to get from task or use first project
+            project_id_for_columns = None
+            # Try to get project_id from task if available
+            if task_titles and fetched_data.get("tasks"):
+                first_task = next((t for t in fetched_data["tasks"].values() if t), None)
+                if first_task:
+                    project_id_for_columns = first_task.get("projectId")
+            # If no task found, try to get from projects
+            if not project_id_for_columns and project_names and fetched_data.get("projects"):
+                first_project = next((p for p in fetched_data["projects"].values() if p), None)
+                if first_project:
+                    project_id_for_columns = first_project.get("id")
+            
+            if project_id_for_columns:
+                columns = await self.fetch_columns(project_id_for_columns)
+                for column_name in column_names:
+                    column = next((c for c in columns if c.get('name', '').lower() == column_name.lower()), None)
+                    if column:
+                        fetched_data["columns"][column_name] = column
+                        self.logger.info(f"[DataFetcher] Column '{column_name}' found: {column.get('id')}")
+                    else:
+                        fetched_data["columns"][column_name] = None
+                        self.logger.warning(f"[DataFetcher] Column '{column_name}' not found")
+            else:
+                self.logger.warning(f"[DataFetcher] Cannot fetch columns: project_id not found")
+                for column_name in column_names:
+                    fetched_data["columns"][column_name] = None
         
         # Fetch task data by task_id
         task_ids = required_data.get("task_data", [])

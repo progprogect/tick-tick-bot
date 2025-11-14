@@ -334,6 +334,7 @@ class TickTickClient(BaseAPIClient):
         task_id: str,
         title: Optional[str] = None,
         project_id: Optional[str] = None,
+        column_id: Optional[str] = None,
         due_date: Optional[str] = None,
         priority: Optional[int] = None,
         status: Optional[int] = None,
@@ -350,6 +351,7 @@ class TickTickClient(BaseAPIClient):
             task_id: Task ID
             title: New title
             project_id: New project ID
+            column_id: New column ID (for Kanban projects)
             due_date: New due date
             priority: New priority
             status: New status (0: Incomplete, 1: Completed)
@@ -375,6 +377,9 @@ class TickTickClient(BaseAPIClient):
         
         if project_id is not None:
             task_data["projectId"] = project_id
+        
+        if column_id is not None:
+            task_data["columnId"] = column_id
         
         if due_date is not None:
             task_data["dueDate"] = _format_date_for_ticktick(due_date)

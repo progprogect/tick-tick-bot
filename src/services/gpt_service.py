@@ -557,6 +557,16 @@ class GPTService:
                     lines.append(f"  - '{name}': НЕ НАЙДЕН")
             lines.append("")
         
+        # Format columns (for Kanban projects)
+        if fetched_data.get("columns"):
+            lines.append("НАЙДЕННЫЕ КОЛОНКИ/СЕКЦИИ (для Kanban проектов):")
+            for name, column in fetched_data["columns"].items():
+                if column:
+                    lines.append(f"  - '{name}': {{id: '{column.get('id')}', name: '{column.get('name')}', projectId: '{column.get('projectId')}'}}")
+                else:
+                    lines.append(f"  - '{name}': НЕ НАЙДЕНА")
+            lines.append("")
+        
         # Format task data
         if fetched_data.get("task_data"):
             lines.append("ДАННЫЕ ЗАДАЧ:")

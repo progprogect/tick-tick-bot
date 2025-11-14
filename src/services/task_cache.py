@@ -138,6 +138,7 @@ class TaskCacheService:
         task_id: str, 
         title: str, 
         project_id: Optional[str] = None,
+        column_id: Optional[str] = None,
         original_task_id: Optional[str] = None,
         status: str = "active",
         tags: Optional[List[str]] = None,
@@ -153,6 +154,7 @@ class TaskCacheService:
             task_id: Task ID
             title: Task title
             project_id: Project ID (optional)
+            column_id: Column ID (optional, for Kanban projects)
             original_task_id: Original task ID if this is a replacement (optional)
             status: Task status (active, completed, deleted)
             tags: Tags list (optional)
@@ -168,7 +170,8 @@ class TaskCacheService:
         
         self._cache[task_id] = {
             'title': title,
-            'project_id': project_id or existing_data.get('project_id'),
+            'project_id': project_id if project_id is not None else existing_data.get('project_id'),
+            'column_id': column_id if column_id is not None else existing_data.get('column_id'),
             'status': status,
             'original_task_id': original_task_id or existing_data.get('original_task_id'),
             'tags': tags if tags is not None else existing_data.get('tags', []),
