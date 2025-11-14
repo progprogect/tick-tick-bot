@@ -276,7 +276,7 @@ class DataFetcher:
                     project_id_for_columns = first_project.get("id")
             
             if project_id_for_columns:
-                columns = await self.fetch_columns(project_id_for_columns)
+                columns = await self.column_cache.get_columns(project_id_for_columns)
                 for column_name in column_names:
                     column = next((c for c in columns if c.get('name', '').lower() == column_name.lower()), None)
                     if column:
