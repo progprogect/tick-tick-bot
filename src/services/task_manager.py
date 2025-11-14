@@ -35,6 +35,7 @@ from src.utils.formatters import (
     format_task_created,
     format_task_updated,
     format_task_deleted,
+    format_task_completed,
 )
 
 
@@ -438,6 +439,72 @@ class TaskManager:
             raise
         except Exception as e:
             self.logger.error(f"Error deleting task: {e}", exc_info=True)
+            raise
+    
+    async def complete_task(self, command: ParsedCommand) -> str:
+        """
+        Complete task (mark as done)
+        
+        Args:
+            command: Parsed command with task ID or title
+            
+        Returns:
+            Success message
+        """
+        try:
+            if not command.task_id:
+                if not command.title:
+                    raise ValueError("Не указано название задачи или ID для завершения")
+                
+                # Use TaskSearchService to find task
+                task = await self.task_search.find_task_by_title(
+                    title=command.title,
+                    project_id=command.project_id,
+                )
+                
+                if task:
+                    command.task_id = task.get("id")
+                    title = task.get("title", command.title)
+                    self.logger.debug(f"Found task ID: {command.task_id}")
+                else:
+                    raise ValueError(
+                        f"Задача '{command.title}' не найдена. "
+                        f"Попробуйте создать новую задачу или укажите ID задачи."
+                    )
+            else:
+                # Get task title from cache
+                task_data = self.cache.get_task_data(command.task_id)
+                title = task_data.get("title", "Задача") if task_data else "Задача"
+            
+            # Check if task is already completed
+            task_data = self.cache.get_task_data(command.task_id)
+            if task_data and task_data.get('status') == 'completed':
+                return f"Задача '{title}' уже выполнена"
+            
+            # Get project_id for complete (required by API)
+            project_id = command.project_id
+            if not project_id:
+                task_data = self.cache.get_task_data(command.task_id)
+                if task_data:
+                    project_id = task_data.get('project_id')
+            
+            if not project_id:
+                raise ValueError(
+                    f"Не найден project_id для задачи {command.task_id}. "
+                    f"Попробуйте указать список задачи."
+                )
+            
+            # Complete task using correct API endpoint (POST /open/v1/project/{projectId}/task/{taskId}/complete)
+            await self.client.complete_task(command.task_id, project_id=project_id)
+            # Cache is updated automatically in TickTickClient.complete_task
+            self.logger.info(f"Task completed: {command.task_id}")
+            return format_task_completed(title)
+            
+        except ValueError:
+            # Re-raise ValueError as-is (it's already user-friendly)
+            raise
+        except Exception as e:
+            self.logger.error(f"Error completing task: {e}", exc_info=True)
             raise
     
     async def move_task(self, command: ParsedCommand) -> str:

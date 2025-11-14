@@ -101,6 +101,19 @@ def format_task_deleted(title: str) -> str:
     return f"✓ Задача '{title}' удалена"
 
 
+def format_task_completed(title: str) -> str:
+    """
+    Format task completion confirmation message
+    
+    Args:
+        title: Task title
+        
+    Returns:
+        Formatted message
+    """
+    return f"✓ Задача '{title}' отмечена как выполненная"
+
+
 def format_bulk_operation(operation: str, count: int) -> str:
     """
     Format bulk operation confirmation message

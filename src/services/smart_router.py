@@ -274,6 +274,13 @@ class SmartRouter:
                 result = await self._execute_delete_task(operation, context)
                 results.append(result)
             return self._combine_results(results)
+        elif group.type == ActionType.COMPLETE_TASK:
+            # Execute all complete operations
+            results = []
+            for operation in group.operations:
+                result = await self._execute_complete_task(operation, context)
+                results.append(result)
+            return self._combine_results(results)
         elif group.type == ActionType.MOVE_TASK:
             # Execute all move operations
             results = []
@@ -487,6 +494,39 @@ class SmartRouter:
         )
         
         return await self.task_manager.delete_task(command)
+    
+    async def _execute_complete_task(
+        self,
+        operation: Operation,
+        context: Dict[str, Any],
+    ) -> str:
+        """Execute complete_task operation"""
+        # Prefer operation-specific task_id for multiple operations support
+        task_id = None
+        if operation.task_identifier:
+            task_id = context.get(f'operation_{id(operation)}_task_id')
+            if not task_id:
+                # Try to resolve it now
+                try:
+                    task_id = await self._resolve_task_identifier(operation.task_identifier)
+                    context[f'operation_{id(operation)}_task_id'] = task_id
+                except Exception as e:
+                    self.logger.warning(f"Failed to resolve task identifier for complete: {e}")
+        
+        # Fallback to common task_id
+        if not task_id:
+            task_id = context.get('task_id')
+        
+        if not task_id:
+            raise ValueError("Task ID not found for complete operation")
+        
+        from src.models.command import ParsedCommand
+        command = ParsedCommand(
+            action=ActionType.COMPLETE_TASK,
+            task_id=task_id,
+        )
+        
+        return await self.task_manager.complete_task(command)
     
     async def _execute_move_task(
         self,

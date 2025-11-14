@@ -12,6 +12,7 @@ class ActionType(str, Enum):
     CREATE_TASK = "create_task"
     UPDATE_TASK = "update_task"
     DELETE_TASK = "delete_task"
+    COMPLETE_TASK = "complete_task"
     MOVE_TASK = "move_task"
     ADD_TAGS = "add_tags"
     ADD_NOTE = "add_note"
