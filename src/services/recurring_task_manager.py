@@ -2,9 +2,9 @@
 Recurring task management service
 """
 
-from typing import Optional
+from typing import Optional, Tuple
 from src.api.ticktick_client import TickTickClient
-from src.models.command import ParsedCommand
+from src.models.command import ParsedCommand, Recurrence
 from src.utils.logger import logger
 
 
@@ -20,6 +20,53 @@ class RecurringTaskManager:
         """
         self.client = ticktick_client
         self.logger = logger
+    
+    @staticmethod
+    def _build_repeat_flag(recurrence: Recurrence) -> str:
+        """
+        Build RRULE format string from recurrence
+        
+        Args:
+            recurrence: Recurrence object with type and interval
+            
+        Returns:
+            RRULE format string (e.g., "RRULE:FREQ=DAILY;INTERVAL=1")
+        """
+        recurrence_type = recurrence.type.upper()  # DAILY, WEEKLY, MONTHLY
+        interval = recurrence.interval or 1
+        
+        # Build RRULE according to RFC 5545
+        # Format: "RRULE:FREQ=DAILY;INTERVAL=1"
+        return f"RRULE:FREQ={recurrence_type};INTERVAL={interval}"
+    
+    @staticmethod
+    def _determine_start_date(due_date: Optional[str] = None) -> str:
+        """
+        Determine startDate for recurring task
+        
+        IMPORTANT: TickTick API requires startDate for recurring tasks.
+        If due_date is provided, use it as startDate.
+        If not, use current date as startDate.
+        
+        Args:
+            due_date: Optional due date in ISO format
+            
+        Returns:
+            Start date in TickTick API format (yyyy-MM-dd'T'HH:mm:ss+0000)
+        """
+        from datetime import datetime
+        
+        if due_date:
+            # Parse due_date and use it as startDate
+            try:
+                due_dt = datetime.fromisoformat(due_date.replace('Z', '+00:00'))
+                return due_dt.isoformat().replace('+00:00', '+0000')
+            except:
+                # If parsing fails, use current date
+                return datetime.now().strftime('%Y-%m-%dT%H:%M:%S+0000')
+        else:
+            # Use current date as startDate
+            return datetime.now().strftime('%Y-%m-%dT%H:%M:%S+0000')
     
     async def create_recurring_task(self, command: ParsedCommand) -> str:
         """
@@ -41,30 +88,11 @@ class RecurringTaskManager:
             if not command.recurrence:
                 raise ValueError("Параметры повторения не указаны")
             
-            # Map recurrence type to TickTick RRULE format
-            recurrence_type = command.recurrence.type.upper()  # DAILY, WEEKLY, MONTHLY
-            interval = command.recurrence.interval or 1
+            # Build repeat flag using shared method
+            repeat_flag = self._build_repeat_flag(command.recurrence)
             
-            # Build RRULE according to RFC 5545
-            # Format: "RRULE:FREQ=DAILY;INTERVAL=1"
-            repeat_flag = f"RRULE:FREQ={recurrence_type};INTERVAL={interval}"
-            
-            # IMPORTANT: TickTick API requires startDate for recurring tasks
-            # If due_date is provided, use it as startDate
-            # If not, use current date as startDate
-            from datetime import datetime
-            if command.due_date:
-                # Parse due_date and use it as startDate
-                try:
-                    from datetime import datetime
-                    due_dt = datetime.fromisoformat(command.due_date.replace('Z', '+00:00'))
-                    start_date = due_dt.isoformat().replace('+00:00', '+0000')
-                except:
-                    # If parsing fails, use current date
-                    start_date = datetime.now().strftime('%Y-%m-%dT%H:%M:%S+0000')
-            else:
-                # Use current date as startDate
-                start_date = datetime.now().strftime('%Y-%m-%dT%H:%M:%S+0000')
+            # Determine start date using shared method
+            start_date = self._determine_start_date(command.due_date)
             
             # Create task with repeatFlag and startDate
             # Note: repeatFlag requires startDate to work in TickTick API
@@ -95,6 +123,7 @@ class RecurringTaskManager:
                     repeat_flag=repeat_flag,
                 )
             
+            interval = command.recurrence.interval or 1
             recurrence_text = self._format_recurrence(command.recurrence.type, interval)
             return f"✓ Создана повторяющаяся задача '{command.title}' ({recurrence_text})"
             

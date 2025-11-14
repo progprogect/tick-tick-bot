@@ -386,13 +386,34 @@ class TaskManager:
                     # Title seems to be updated
                     update_data["title"] = command.title
             
+            # Handle recurrence - add repeatFlag and startDate for recurring tasks
+            if command.recurrence:
+                from src.services.recurring_task_manager import RecurringTaskManager
+                
+                # Build repeat flag using shared method from RecurringTaskManager
+                repeat_flag = RecurringTaskManager._build_repeat_flag(command.recurrence)
+                update_data["repeatFlag"] = repeat_flag
+                
+                # Determine start date - use due_date if provided, otherwise current date
+                # TickTick API requires startDate for recurring tasks
+                start_date = RecurringTaskManager._determine_start_date(command.due_date)
+                update_data["startDate"] = start_date
+                
+                self.logger.debug(f"Adding recurrence to task: repeatFlag={repeat_flag}, startDate={start_date}")
+            
             # If no fields to update, return error
             if not update_data:
                 raise ValueError("Не указаны параметры для обновления")
             
             # Update task using correct API endpoint (POST /open/v1/task/{taskId})
+            # Extract repeatFlag from update_data to pass as explicit parameter
+            # startDate will be passed through kwargs (update_data)
+            repeat_flag = update_data.pop("repeatFlag", None)
+            
+            # Pass remaining update_data (including startDate) as kwargs, and repeat_flag as explicit parameter
             task_data = await self.client.update_task(
                 task_id=command.task_id,
+                repeat_flag=repeat_flag,
                 **update_data
             )
             self.logger.info(f"Task updated: {command.task_id}")
@@ -408,8 +429,8 @@ class TaskManager:
                         status=task_info.get('status', 'active'),
                     )
             
-            # Update cache with new tags and notes if they were added
-            if command.tags or command.notes:
+            # Update cache with new tags, notes, and repeat_flag if they were added
+            if command.tags or command.notes or command.recurrence:
                 task_info = self.cache.get_task_data(command.task_id)
                 if task_info:
                     # Update cache with merged tags and notes
@@ -417,6 +438,9 @@ class TaskManager:
                         task_info['tags'] = update_data.get('tags', [])
                     if command.notes:
                         task_info['notes'] = update_data.get('content', '')
+                    if command.recurrence:
+                        # Update cache with repeat_flag
+                        task_info['repeat_flag'] = update_data.get('repeatFlag')
                     self.cache._cache[command.task_id] = task_info
                     self.cache._save_cache()
             
