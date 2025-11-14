@@ -700,7 +700,8 @@ class PromptManager:
 Для простых команд (одно действие):
 {{
   "action": "название действия",
-  "title": "название задачи",
+  "title": "название задачи (для create_task, update_task и других действий с задачами)",
+  "projectName": "название проекта (ОБЯЗАТЕЛЬНО для create_project, опционально для delete_project)",
   "taskId": "ID задачи (если известен)",
   "projectId": "ID списка (ОБЯЗАТЕЛЬНО использовать точный ID из данных, не название)",
   "targetProjectId": "ID целевого списка (для переноса)",
@@ -712,6 +713,9 @@ class PromptManager:
   "recurrence": {{"type": "daily|weekly|monthly", "interval": 1}},
   "reminder": "дата и время в ISO 8601 с timezone UTC+3 (например, '2025-11-08T10:00:00+03:00')",
   "taskKind": "тип задачи: 'TEXT' (по умолчанию), 'NOTE' (заметка), 'CHECKLIST' (чеклист)",
+  "projectColor": "цвет проекта (опционально для create_project)",
+  "projectViewMode": "режим отображения проекта (опционально для create_project)",
+  "projectKind": "тип проекта (опционально для create_project)",
   "period": "week|month|year|today|tomorrow",
   "startDate": "начальная дата для фильтрации в ISO 8601 с timezone UTC+3",
   "endDate": "конечная дата для фильтрации в ISO 8601 с timezone UTC+3",
@@ -719,6 +723,12 @@ class PromptManager:
   "limit": 1-100 (ограничение количества задач для показа),
   "sortBy": "createdTime|dueDate (для сортировки)"
 }}
+
+КРИТИЧЕСКИ ВАЖНО - РАЗЛИЧИЕ МЕЖДУ title И projectName:
+- "title" используется ТОЛЬКО для задач (create_task, update_task и т.д.)
+- "projectName" используется ТОЛЬКО для проектов (create_project, delete_project)
+- НИКОГДА не используй "title" для create_project - используй "projectName"!
+- НИКОГДА не используй "projectName" для create_task - используй "title"!
 
 Для сложных команд (несколько операций):
 {{
@@ -982,6 +992,49 @@ class PromptManager:
   "taskId": "task_123",
   "targetProjectId": "inbox789012"
 }""",
+            
+            "create_project": """ПРИМЕР для create_project:
+Команда: "Создай проект Работа"
+Данные: {}  // Для create_project НЕ нужно искать существующий проект - это новый проект
+Ответ:
+{
+  "action": "create_project",
+  "projectName": "Работа"
+}
+
+ПРИМЕР 2 для create_project:
+Команда: "Создай список Покупки"
+Данные: {}  // Для create_project НЕ нужно искать существующий проект
+Ответ:
+{
+  "action": "create_project",
+  "projectName": "Покупки"
+}
+
+ПРИМЕР 3 для create_project:
+Команда: "Создай проект Дом"
+Данные: {}  // Для create_project НЕ нужно искать существующий проект
+Ответ:
+{
+  "action": "create_project",
+  "projectName": "Дом"
+}
+
+ПРИМЕР 4 для create_project с опциональными параметрами:
+Команда: "Создай проект Работа с цветом синий"
+Данные: {}  // Для create_project НЕ нужно искать существующий проект
+Ответ:
+{
+  "action": "create_project",
+  "projectName": "Работа",
+  "projectColor": "#0000FF"
+}
+
+КРИТИЧЕСКИ ВАЖНО для create_project:
+- НИКОГДА не используй поле "title" для create_project - используй ТОЛЬКО "projectName"!
+- Для create_project НЕ нужно искать существующий проект - это создание НОВОГО проекта
+- Название проекта из команды пользователя (например, "Дом" из "Создай проект Дом") должно быть в поле "projectName"
+- Опциональные параметры: projectColor, projectViewMode, projectKind""",
             
             "delete_project": """ПРИМЕР для delete_project:
 Команда: "Удали проект Работа"
