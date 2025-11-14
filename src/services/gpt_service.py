@@ -12,6 +12,7 @@ from src.services.prompt_manager import PromptManager
 from src.services.data_fetcher import DataFetcher
 from src.models.command import ParsedCommand
 from src.utils.logger import logger
+from src.utils.date_utils import get_current_date_str
 
 
 class GPTService:
@@ -396,7 +397,7 @@ class GPTService:
 ВАЖНО для list_tasks:
 - Если в ПОЛУЧЕННЫХ ДАННЫХ есть "ЗАДАЧИ ПО ФИЛЬТРАМ", это означает что пользователь запросил задачи на конкретную дату
 - В этом случае ОБЯЗАТЕЛЬНО используй startDate и endDate для этой даты в JSON ответе
-- Если команда содержит "на сегодня" или "сегодня", используй текущую дату ({datetime.now().strftime('%Y-%m-%d')})
+- Если команда содержит "на сегодня" или "сегодня", используй текущую дату ({get_current_date_str()})
 - Если команда содержит "на завтра" или "завтра", используй завтрашнюю дату"""
             
             messages = [

@@ -3,9 +3,11 @@ Recurring task management service
 """
 
 from typing import Optional, Tuple
+from datetime import timezone
 from src.api.ticktick_client import TickTickClient
 from src.models.command import ParsedCommand, Recurrence
 from src.utils.logger import logger
+from src.utils.date_utils import get_current_datetime
 
 
 class RecurringTaskManager:
@@ -60,13 +62,20 @@ class RecurringTaskManager:
             # Parse due_date and use it as startDate
             try:
                 due_dt = datetime.fromisoformat(due_date.replace('Z', '+00:00'))
-                return due_dt.isoformat().replace('+00:00', '+0000')
+                # Convert to UTC for TickTick API format
+                if due_dt.tzinfo:
+                    due_dt_utc = due_dt.astimezone(timezone.utc)
+                else:
+                    due_dt_utc = due_dt.replace(tzinfo=timezone.utc)
+                return due_dt_utc.strftime('%Y-%m-%dT%H:%M:%S+0000')
             except:
-                # If parsing fails, use current date
-                return datetime.now().strftime('%Y-%m-%dT%H:%M:%S+0000')
+                # If parsing fails, use current date in UTC
+                current_utc = get_current_datetime().astimezone(timezone.utc)
+                return current_utc.strftime('%Y-%m-%dT%H:%M:%S+0000')
         else:
-            # Use current date as startDate
-            return datetime.now().strftime('%Y-%m-%dT%H:%M:%S+0000')
+            # Use current date as startDate (convert to UTC for API)
+            current_utc = get_current_datetime().astimezone(timezone.utc)
+            return current_utc.strftime('%Y-%m-%dT%H:%M:%S+0000')
     
     async def create_recurring_task(self, command: ParsedCommand) -> str:
         """

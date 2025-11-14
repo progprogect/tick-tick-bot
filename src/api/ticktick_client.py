@@ -9,6 +9,7 @@ from src.api.base_client import BaseAPIClient
 from src.config.settings import settings
 from src.config.constants import TICKTICK_API_BASE_URL, TICKTICK_API_VERSION, USER_TIMEZONE_OFFSET, USER_TIMEZONE_STR
 from src.utils.logger import logger
+from src.utils.date_utils import get_current_datetime, USER_TIMEZONE
 
 
 def _format_date_for_ticktick(date_str: str) -> str:
@@ -876,17 +877,24 @@ class TickTickClient(BaseAPIClient):
         Convert reminder time (ISO 8601) to TickTick TRIGGER format
         
         Args:
-            reminder_time: Reminder time in ISO 8601 format (e.g., "2024-11-05T12:00:00+00:00")
+            reminder_time: Reminder time in ISO 8601 format (e.g., "2024-11-05T12:00:00+03:00")
+            Expected to be in UTC+3 timezone
             
         Returns:
             TRIGGER string (e.g., "TRIGGER:P0DT9H0M0S" for 9 hours before, "TRIGGER:PT0S" for at time)
         """
-        from datetime import datetime, timedelta
-        
         try:
             # Parse reminder time
             reminder_dt = datetime.fromisoformat(reminder_time.replace('Z', '+00:00'))
-            now = datetime.now(reminder_dt.tzinfo)
+            
+            # Ensure reminder is in UTC+3 timezone
+            if reminder_dt.tzinfo is None:
+                reminder_dt = reminder_dt.replace(tzinfo=USER_TIMEZONE)
+            else:
+                reminder_dt = reminder_dt.astimezone(USER_TIMEZONE)
+            
+            # Get current time in UTC+3
+            now = get_current_datetime()
             
             # Calculate difference
             diff = reminder_dt - now

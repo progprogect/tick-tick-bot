@@ -8,6 +8,7 @@ from typing import Optional, Dict, List, Any
 from pathlib import Path
 from datetime import datetime
 from src.utils.logger import logger
+from src.utils.date_utils import get_current_datetime
 
 
 class TaskCacheService:
@@ -182,8 +183,8 @@ class TaskCacheService:
             'repeat_flag': repeat_flag if repeat_flag is not None else existing_data.get('repeat_flag'),
             'sort_order': sort_order if sort_order is not None else existing_data.get('sort_order'),
             'kind': kind if kind is not None else existing_data.get('kind', 'TEXT'),
-            'created_at': existing_data.get('created_at', datetime.now().isoformat()),
-            'updated_at': datetime.now().isoformat(),
+            'created_at': existing_data.get('created_at', get_current_datetime().isoformat()),
+            'updated_at': get_current_datetime().isoformat(),
         }
         self._save_cache()
         self.logger.debug(f"Cached task: {title} -> {task_id} (status: {status})")
@@ -200,7 +201,7 @@ class TaskCacheService:
         self._load_cache()
         if task_id in self._cache:
             self._cache[task_id][field] = value
-            self._cache[task_id]['updated_at'] = datetime.now().isoformat()
+            self._cache[task_id]['updated_at'] = get_current_datetime().isoformat()
             self._save_cache()
             self.logger.debug(f"Updated field {field} for task {task_id}")
         else:
@@ -223,23 +224,23 @@ class TaskCacheService:
             if 'status' not in task_data:
                 task_data['status'] = 'active'
             if 'created_at' not in task_data:
-                task_data['created_at'] = datetime.now().isoformat()
+                task_data['created_at'] = get_current_datetime().isoformat()
             if 'updated_at' not in task_data:
-                task_data['updated_at'] = datetime.now().isoformat()
+                task_data['updated_at'] = get_current_datetime().isoformat()
         return task_data
     
     def mark_as_completed(self, task_id: str):
         """Mark task as completed in cache"""
         if task_id in self._cache:
             self._cache[task_id]['status'] = 'completed'
-            self._cache[task_id]['updated_at'] = datetime.now().isoformat()
+            self._cache[task_id]['updated_at'] = get_current_datetime().isoformat()
             self._save_cache()
     
     def mark_as_deleted(self, task_id: str):
         """Mark task as deleted in cache"""
         if task_id in self._cache:
             self._cache[task_id]['status'] = 'deleted'
-            self._cache[task_id]['updated_at'] = datetime.now().isoformat()
+            self._cache[task_id]['updated_at'] = get_current_datetime().isoformat()
             self._save_cache()
     
     def delete_task(self, task_id: str):

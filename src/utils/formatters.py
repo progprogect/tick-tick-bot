@@ -6,6 +6,7 @@ from typing import List, Dict, Any, Union
 from datetime import datetime, timedelta, timezone
 from src.models.task import Task
 from src.config.constants import USER_TIMEZONE_OFFSET
+from src.utils.date_utils import USER_TIMEZONE, get_current_datetime
 
 
 def format_task_created(task: Dict[str, Any]) -> str:
@@ -28,7 +29,9 @@ def format_task_created(task: Dict[str, Any]) -> str:
         message += f" в списке {project_id}"
     
     if due_date:
-        message += f" на {due_date}"
+        # Format date with time using format_datetime_for_user
+        formatted_date = format_datetime_for_user(due_date)
+        message += f" на {formatted_date}"
     
     return message
 
@@ -48,17 +51,13 @@ def format_task_updated(task: Dict[str, Any]) -> str:
     
     # Check for changed fields (only show what was actually updated)
     if "dueDate" in task and task["dueDate"]:
-        # Format date nicely
+        # Format date with time using format_datetime_for_user
         due_date = task["dueDate"]
         if isinstance(due_date, str):
-            # Try to format ISO date
-            try:
-                from datetime import datetime
-                dt = datetime.fromisoformat(due_date.replace('Z', '+00:00'))
-                due_date = dt.strftime('%d.%m.%Y')
-            except:
-                pass
-        changes.append(f"дата изменена на {due_date}")
+            formatted_date = format_datetime_for_user(due_date)
+        else:
+            formatted_date = format_datetime_for_user(str(due_date))
+        changes.append(f"дата изменена на {formatted_date}")
     
     if "title" in task and task.get("title") != title:
         changes.append(f"название изменено на '{task['title']}'")
@@ -208,9 +207,6 @@ def format_date_for_user(date: Union[datetime, str]) -> str:
     Returns:
         Formatted date string in Russian
     """
-    # Create UTC+3 timezone
-    user_tz = timezone(timedelta(hours=USER_TIMEZONE_OFFSET))
-    
     # Convert to datetime if string
     if isinstance(date, str):
         try:
@@ -219,10 +215,10 @@ def format_date_for_user(date: Union[datetime, str]) -> str:
             dt = datetime.fromisoformat(date_str)
             # If timezone-naive, assume UTC+3
             if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=user_tz)
+                dt = dt.replace(tzinfo=USER_TIMEZONE)
             else:
                 # Convert to UTC+3
-                dt = dt.astimezone(user_tz)
+                dt = dt.astimezone(USER_TIMEZONE)
         except (ValueError, AttributeError):
             # If parsing fails, return as is
             return date
@@ -231,13 +227,13 @@ def format_date_for_user(date: Union[datetime, str]) -> str:
         dt = date
         # Ensure timezone-aware
         if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=user_tz)
+            dt = dt.replace(tzinfo=USER_TIMEZONE)
         else:
             # Convert to UTC+3
-            dt = dt.astimezone(user_tz)
+            dt = dt.astimezone(USER_TIMEZONE)
     
     # Get today in UTC+3
-    today = datetime.now(user_tz).date()
+    today = get_current_datetime().date()
     date_only = dt.date()
     
     # Calculate difference
@@ -252,4 +248,65 @@ def format_date_for_user(date: Union[datetime, str]) -> str:
     else:
         # Format as DD.MM.YYYY
         return date_only.strftime('%d.%m.%Y')
+
+
+def format_datetime_for_user(datetime_str: str) -> str:
+    """
+    Format datetime with time for user-friendly display
+    
+    Converts ISO datetime string to readable format:
+    - "сегодня в 10:00" for today with time
+    - "завтра в 10:00" for tomorrow with time
+    - "14.11.2025 в 10:00" for other dates with time
+    - "сегодня" for today at midnight (00:00:00)
+    - "завтра" for tomorrow at midnight (00:00:00)
+    
+    Args:
+        datetime_str: ISO 8601 datetime string (with UTC+3 timezone)
+        
+    Returns:
+        Formatted datetime string in Russian
+    """
+    try:
+        # Handle ISO format with timezone
+        date_str = datetime_str.replace('Z', '+00:00')
+        dt = datetime.fromisoformat(date_str)
+        
+        # If timezone-naive, assume UTC+3
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=USER_TIMEZONE)
+        else:
+            # Convert to UTC+3
+            dt = dt.astimezone(USER_TIMEZONE)
+    except (ValueError, AttributeError):
+        # If parsing fails, try format_date_for_user as fallback
+        return format_date_for_user(datetime_str)
+    
+    # Get today in UTC+3
+    today = get_current_datetime().date()
+    date_only = dt.date()
+    time_only = dt.time()
+    
+    # Check if time is midnight (00:00:00)
+    is_midnight = time_only.hour == 0 and time_only.minute == 0 and time_only.second == 0
+    
+    # Calculate difference
+    delta = (date_only - today).days
+    
+    # Format date part
+    if delta == 0:
+        date_part = "сегодня"
+    elif delta == 1:
+        date_part = "завтра"
+    elif delta == 2:
+        date_part = "послезавтра"
+    else:
+        date_part = date_only.strftime('%d.%m.%Y')
+    
+    # Add time part if not midnight
+    if is_midnight:
+        return date_part
+    else:
+        time_str = time_only.strftime('%H:%M')
+        return f"{date_part} в {time_str}"
 

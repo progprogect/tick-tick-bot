@@ -10,6 +10,7 @@ from src.services.task_cache import TaskCacheService
 from src.services.project_cache_service import ProjectCacheService
 from src.services.column_cache_service import ColumnCacheService
 from src.utils.logger import logger
+from src.utils.date_utils import get_current_datetime
 
 
 def _clean_project_name(name: str) -> str:
@@ -62,7 +63,7 @@ class DataFetcher:
         # Check cache
         if (self._all_tasks_cache is not None and 
             self._all_tasks_cache_time is not None and
-            datetime.now() - self._all_tasks_cache_time < self._all_tasks_cache_ttl):
+            get_current_datetime() - self._all_tasks_cache_time < self._all_tasks_cache_ttl):
             self.logger.info(f"[DataFetcher] Using cached all tasks ({len(self._all_tasks_cache)} tasks)")
             return self._all_tasks_cache
         
@@ -163,7 +164,7 @@ class DataFetcher:
         
         # Update cache
         self._all_tasks_cache = all_tasks
-        self._all_tasks_cache_time = datetime.now()
+        self._all_tasks_cache_time = get_current_datetime()
         self.logger.info(
             f"[DataFetcher] Cached {len(all_tasks)} tasks "
             f"({len(incomplete_tasks)} incomplete from API + {len(tasks_from_cache)} from cache, TTL: 2 minutes)"

@@ -15,6 +15,7 @@ from src.config.constants import (
     OPENAI_TEMPERATURE,
 )
 from src.utils.logger import logger
+from src.utils.date_utils import get_current_datetime_for_gpt
 
 
 class OpenAIClient:
@@ -169,10 +170,9 @@ class OpenAIClient:
                 "Если команда неоднозначна, верни JSON с полем 'error' и сообщением."
             )
         
-        # Add current date to system prompt
-        current_date = datetime.now().strftime("%Y-%m-%d")
-        current_datetime = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        date_context = f"\n\nВАЖНО: Сегодня - {current_date} ({current_datetime}). Используй эту дату для определения относительных дат (сегодня, завтра, на следующей неделе и т.д.)."
+        # Add current date to system prompt (in UTC+3)
+        current_datetime_str = get_current_datetime_for_gpt()
+        date_context = f"\n\nВАЖНО: Сегодня - {current_datetime_str}. Используй эту дату для определения относительных дат (сегодня, завтра, на следующей неделе и т.д.). Все время указано в UTC+3 (московское время)."
         
         # Add context information (projects only) if available
         context_text = ""
