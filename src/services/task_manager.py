@@ -343,6 +343,10 @@ class TaskManager:
                 
                 if task:
                     command.task_id = task.get("id")
+                    # Also set project_id from found task if not already set
+                    if not command.project_id and task.get("projectId"):
+                        command.project_id = task.get("projectId")
+                        self.logger.debug(f"Set project_id from found task: {command.project_id}")
                     self.logger.debug(f"Found task ID: {command.task_id}")
                 else:
                     raise ValueError(
@@ -432,6 +436,12 @@ class TaskManager:
                         f"update_task called with no update fields for task '{command.title or command.task_id}'. "
                         f"This might be a complete_task command. Redirecting to complete_task."
                     )
+                    # If task was found but project_id is missing, try to get it from task data
+                    if command.task_id and not command.project_id:
+                        task_data = self.cache.get_task_data(command.task_id)
+                        if task_data and task_data.get('project_id'):
+                            command.project_id = task_data.get('project_id')
+                            self.logger.debug(f"Set project_id from cache: {command.project_id}")
                     # Redirect to complete_task
                     return await self.complete_task(command)
                 else:
