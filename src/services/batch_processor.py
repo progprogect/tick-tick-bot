@@ -112,23 +112,22 @@ class BatchProcessor:
             self.logger.info(f"Found {len(overdue_tasks)} overdue tasks")
             
             # Process in batches
-            # Import TaskManager for proper move_task with fallback
-            from src.services.task_manager import TaskManager
-            from src.models.command import ParsedCommand, ActionType
+            # Import for date formatting
+            from src.api.ticktick_client import _format_date_for_ticktick
+            from src.services.task_cache import TaskCacheService
             
-            task_manager = TaskManager(self.client)
+            cache = TaskCacheService()
             
-            async def move_task(task: Dict[str, Any]):
+            async def update_task_date(task: Dict[str, Any]):
+                """
+                Update due date for a single overdue task
+                """
                 try:
-                    # Ensure task is in cache before moving
-                    from src.services.task_cache import TaskCacheService
-                    cache = TaskCacheService()
-                    
                     task_id = task.get("id")
                     task_title = task.get("title", "")
                     task_project_id = task.get("projectId")
                     
-                    # Add task to cache if not present
+                    # Ensure task is in cache
                     if not cache.get_task_data(task_id):
                         cache.save_task(
                             task_id=task_id,
@@ -137,49 +136,52 @@ class BatchProcessor:
                             status=task.get("status", 0),
                         )
                     
-                    # Use TaskManager.move_task which has fallback support
-                    command = ParsedCommand(
-                        action=ActionType.MOVE_TASK,
+                    # Format target date to ISO string with UTC+3 timezone
+                    # to_date is datetime, convert to UTC+3 ISO format
+                    from datetime import timezone, timedelta
+                    from src.config.constants import USER_TIMEZONE_OFFSET
+                    
+                    user_tz = timezone(timedelta(hours=USER_TIMEZONE_OFFSET))
+                    
+                    # Ensure to_date is timezone-aware
+                    if to_date.tzinfo is None:
+                        to_date_tz = to_date.replace(tzinfo=user_tz)
+                    else:
+                        to_date_tz = to_date.astimezone(user_tz)
+                    
+                    # Format as ISO string with UTC+3
+                    due_date_iso = to_date_tz.strftime('%Y-%m-%dT%H:%M:%S+03:00')
+                    
+                    # Format for TickTick API (converts UTC+3 to UTC format)
+                    due_date_formatted = _format_date_for_ticktick(due_date_iso)
+                    
+                    # Update task: only change dueDate, optionally move to target project
+                    update_params = {
+                        "due_date": due_date_formatted,
+                    }
+                    
+                    # If target project is specified, move task to that project
+                    if target_project_id:
+                        update_params["project_id"] = target_project_id
+                    
+                    # Update task via API
+                    await self.client.update_task(
                         task_id=task_id,
-                        target_project_id=target_project_id,
+                        **update_params
                     )
                     
-                    # Move task using TaskManager (has fallback)
-                    await task_manager.move_task(command)
+                    self.logger.debug(f"Updated task {task_id} due date to {due_date_iso}")
                     
-                    # Update due date to target date
-                    # Note: task_id might have changed in fallback, so we need to get the new ID
-                    # For now, we'll update the due date for the original task
-                    # If fallback was used, the new task will have the same due date from original
-                    try:
-                        # Format due date in TickTick format
-                        from src.api.ticktick_client import TickTickClient
-                        due_date_formatted = to_date.strftime('%Y-%m-%dT%H:%M:%S+0000')
-                        
-                        # Try to update due date for the moved task
-                        # Note: if fallback was used, the task ID changed, so we need to find it
-                        # For simplicity, we'll update the due date after move
-                        # The moved task should have the new ID from the fallback
-                        await self.client.update_task(
-                            task_id=task_id,  # Use original task_id - if moved via fallback, this might fail but that's OK
-                            due_date=due_date_formatted,
-                        )
-                    except Exception as date_error:
-                        # If update fails (e.g., task was moved via fallback and ID changed), that's OK
-                        # The fallback preserves the due date from original task
-                        self.logger.debug(f"Could not update due date for task {task_id}: {date_error}")
-                        # Continue - task was moved, date update is secondary
-                except Exception as move_error:
-                    # If move fails, log and continue
-                    error_msg = str(move_error)
+                except Exception as update_error:
+                    # Log error but continue with other tasks
+                    error_msg = str(update_error)
                     if "500" in error_msg or "404" in error_msg or "not found" in error_msg.lower():
-                        self.logger.warning(f"Cannot move task {task.get('id')}: {error_msg}")
-                        # Don't raise - continue with other tasks
+                        self.logger.warning(f"Cannot update task {task.get('id')}: {error_msg}")
                     else:
-                        self.logger.error(f"Error moving task {task.get('id')}: {move_error}")
-                        # Don't raise - continue with other tasks
+                        self.logger.error(f"Error updating task {task.get('id')}: {update_error}")
+                    # Don't raise - continue with other tasks
             
-            processed = await self.process_batch(overdue_tasks, move_task)
+            processed = await self.process_batch(overdue_tasks, update_task_date)
             
             return processed
             

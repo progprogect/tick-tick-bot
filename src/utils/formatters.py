@@ -2,9 +2,10 @@
 Message formatting utilities
 """
 
-from typing import List, Dict, Any
-from datetime import datetime
+from typing import List, Dict, Any, Union
+from datetime import datetime, timedelta, timezone
 from src.models.task import Task
+from src.config.constants import USER_TIMEZONE_OFFSET
 
 
 def format_task_created(task: Dict[str, Any]) -> str:
@@ -176,4 +177,66 @@ def format_project_created(project: Dict[str, Any]) -> str:
         message += f" (ID: {project_id})"
     
     return message
+
+
+def format_date_for_user(date: Union[datetime, str]) -> str:
+    """
+    Format date for user-friendly display
+    
+    Converts datetime or ISO string to readable format:
+    - "сегодня" for today
+    - "завтра" for tomorrow
+    - "послезавтра" for day after tomorrow
+    - "DD.MM.YYYY" for other dates
+    
+    Args:
+        date: datetime object or ISO 8601 string (with UTC+3 timezone)
+        
+    Returns:
+        Formatted date string in Russian
+    """
+    # Create UTC+3 timezone
+    user_tz = timezone(timedelta(hours=USER_TIMEZONE_OFFSET))
+    
+    # Convert to datetime if string
+    if isinstance(date, str):
+        try:
+            # Handle ISO format with timezone
+            date_str = date.replace('Z', '+00:00')
+            dt = datetime.fromisoformat(date_str)
+            # If timezone-naive, assume UTC+3
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=user_tz)
+            else:
+                # Convert to UTC+3
+                dt = dt.astimezone(user_tz)
+        except (ValueError, AttributeError):
+            # If parsing fails, return as is
+            return date
+    else:
+        # datetime object
+        dt = date
+        # Ensure timezone-aware
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=user_tz)
+        else:
+            # Convert to UTC+3
+            dt = dt.astimezone(user_tz)
+    
+    # Get today in UTC+3
+    today = datetime.now(user_tz).date()
+    date_only = dt.date()
+    
+    # Calculate difference
+    delta = (date_only - today).days
+    
+    if delta == 0:
+        return "сегодня"
+    elif delta == 1:
+        return "завтра"
+    elif delta == 2:
+        return "послезавтра"
+    else:
+        # Format as DD.MM.YYYY
+        return date_only.strftime('%d.%m.%Y')
 

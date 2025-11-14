@@ -574,6 +574,7 @@ class SmartRouter:
         """Execute bulk_move operation"""
         from datetime import datetime
         from src.models.command import ParsedCommand
+        from src.utils.formatters import format_date_for_user
         
         from_date = operation.params.get("fromDate")
         to_date = operation.params.get("toDate")
@@ -581,12 +582,18 @@ class SmartRouter:
         if not from_date or not to_date:
             raise ValueError("fromDate and toDate required for bulk_move")
         
+        # Parse dates
+        from_date_dt = datetime.fromisoformat(from_date.replace('Z', '+00:00'))
+        to_date_dt = datetime.fromisoformat(to_date.replace('Z', '+00:00'))
+        
         count = await self.batch_processor.move_overdue_tasks(
-            from_date=datetime.fromisoformat(from_date),
-            to_date=datetime.fromisoformat(to_date),
+            from_date=from_date_dt,
+            to_date=to_date_dt,
         )
         
-        return f"✓ Перенесено {count} просроченных задач"
+        # Format response with target date
+        formatted_date = format_date_for_user(to_date_dt)
+        return f"✓ Перенесено {count} просроченных задач на {formatted_date}"
     
     async def _execute_add_tags(
         self,

@@ -113,16 +113,57 @@ class TestBot:
                 return await self.task_manager.move_task(parsed_command)
             
             elif action == ActionType.BULK_MOVE:
-                from datetime import datetime, timedelta
-                from_date = datetime.now() - timedelta(days=1)
-                to_date = datetime.now()
+                # Handle bulk move
+                from datetime import datetime, timedelta, timezone
+                from src.utils.date_parser import parse_date
+                from src.utils.formatters import format_date_for_user
+                from src.config.constants import USER_TIMEZONE_OFFSET
                 
+                # Determine from_date (source date for overdue tasks)
+                # Default: today (look for tasks that are overdue as of today)
+                user_tz = timezone(timedelta(hours=USER_TIMEZONE_OFFSET))
+                from_date = datetime.now(user_tz)
+                
+                # Check if period specifies "yesterday" or "вчера"
+                if parsed_command.period and ("вчера" in parsed_command.period.lower() or "yesterday" in parsed_command.period.lower()):
+                    from_date = datetime.now(user_tz) - timedelta(days=1)
+                
+                # Determine to_date (target date) from command
+                # Try end_date first, then due_date, then default to today
+                to_date_str = None
+                if parsed_command.end_date:
+                    to_date_str = parsed_command.end_date
+                elif parsed_command.due_date:
+                    to_date_str = parsed_command.due_date
+                
+                # Parse target date
+                if to_date_str:
+                    # Parse the date string to ISO format
+                    parsed_date_iso = parse_date(to_date_str)
+                    if parsed_date_iso:
+                        # Convert ISO string to datetime
+                        to_date = datetime.fromisoformat(parsed_date_iso)
+                        # Ensure timezone-aware
+                        if to_date.tzinfo is None:
+                            to_date = to_date.replace(tzinfo=user_tz)
+                        else:
+                            to_date = to_date.astimezone(user_tz)
+                    else:
+                        # If parsing failed, default to today
+                        to_date = datetime.now(user_tz)
+                else:
+                    # No date specified, default to today (backward compatibility)
+                    to_date = datetime.now(user_tz)
+                
+                # Execute bulk move
                 count = await self.batch_processor.move_overdue_tasks(
                     from_date=from_date,
                     to_date=to_date,
                 )
                 
-                return f"✓ Перенесено {count} просроченных задач на сегодня"
+                # Format response with target date
+                formatted_date = format_date_for_user(to_date)
+                return f"✓ Перенесено {count} просроченных задач на {formatted_date}"
             
             elif action == ActionType.ADD_TAGS:
                 return await self.tag_manager.add_tags(parsed_command)
