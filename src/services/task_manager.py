@@ -255,7 +255,22 @@ class TaskManager:
                 if parsed_date:
                     due_date = parsed_date
             
-            self.logger.debug(f"Creating task with project_id='{project_id}', due_date='{due_date}'")
+            # Process reminder if provided
+            reminders = None
+            if command.reminder:
+                # Convert ISO format to TRIGGER format
+                trigger = self.client._convert_reminder_time_to_trigger(command.reminder)
+                if trigger:
+                    reminders = [trigger]
+                    self.logger.debug(f"Converted reminder '{command.reminder}' to trigger '{trigger}'")
+                else:
+                    self.logger.warning(f"Failed to convert reminder '{command.reminder}', skipping reminder")
+            
+            # Process task kind - default to TEXT if not specified
+            task_kind = command.task_kind or "TEXT"
+            self.logger.debug(f"Task kind: '{task_kind}'")
+            
+            self.logger.debug(f"Creating task with project_id='{project_id}', due_date='{due_date}', kind='{task_kind}', reminders={reminders}")
             
             task_data = await self.client.create_task(
                 title=command.title,
@@ -264,6 +279,8 @@ class TaskManager:
                 priority=command.priority or 0,
                 tags=command.tags or [],
                 notes=command.notes,
+                reminders=reminders,
+                kind=task_kind,
             )
             
             task_id = task_data.get('id')
@@ -285,12 +302,17 @@ class TaskManager:
             if task_id:
                 # Use resolved project_id (or fallback to task_data)
                 resolved_project_id = project_id or actual_project_id
+                
+                # Save to cache with kind and reminders
                 self.cache.save_task(
                     task_id=task_id,
                     title=command.title,
                     project_id=resolved_project_id,
+                    kind=task_kind,
+                    reminders=reminders,
+                    tags=command.tags,
                 )
-                self.logger.debug(f"Task saved to cache: id='{task_id}', project_id='{resolved_project_id}'")
+                self.logger.debug(f"Task saved to cache: id='{task_id}', project_id='{resolved_project_id}', kind='{task_kind}', reminders={reminders}")
             
             return format_task_created(task_data)
             
@@ -633,6 +655,13 @@ class TaskManager:
                 return await self._move_task_to_column(command, current_project_id)
             
             raise ValueError("Не указан целевой список или секция для переноса")
+        
+        except ValueError:
+            # Re-raise ValueError as-is (it's already user-friendly)
+            raise
+        except Exception as e:
+            self.logger.error(f"Error moving task: {e}", exc_info=True)
+            raise
     
     async def _move_task_to_column(self, command: ParsedCommand, project_id: str) -> str:
         """

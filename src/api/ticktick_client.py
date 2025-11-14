@@ -230,6 +230,8 @@ class TickTickClient(BaseAPIClient):
         repeat_flag: Optional[str] = None,
         reminders: Optional[List[str]] = None,
         start_date: Optional[str] = None,
+        kind: Optional[str] = None,
+        items: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
         """
         Create a new task
@@ -245,6 +247,8 @@ class TickTickClient(BaseAPIClient):
             repeat_flag: Recurring rules in RRULE format (e.g., "RRULE:FREQ=DAILY;INTERVAL=1")
             reminders: List of reminder triggers (e.g., ["TRIGGER:P0DT9H0M0S", "TRIGGER:PT0S"])
             start_date: Start date in ISO 8601 format (required for recurring tasks)
+            kind: Task kind ("TEXT", "NOTE", "CHECKLIST")
+            items: List of checklist items (for CHECKLIST tasks)
             
         Returns:
             Created task data
@@ -280,6 +284,12 @@ class TickTickClient(BaseAPIClient):
         
         if reminders:
             task_data["reminders"] = reminders
+        
+        if kind:
+            task_data["kind"] = kind
+        
+        if items:
+            task_data["items"] = items
         
         return await self.post(
             endpoint=f"/open/{TICKTICK_API_VERSION}/task",
