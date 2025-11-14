@@ -276,6 +276,9 @@ class TickTickBot:
             elif action == ActionType.CREATE_PROJECT:
                 return await self.project_manager.create_project(command)
             
+            elif action == ActionType.DELETE_PROJECT:
+                return await self.project_manager.delete_project(command)
+            
             else:
                 return f"Действие '{action}' пока не реализовано. Используйте /help для списка доступных команд."
         

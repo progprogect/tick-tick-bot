@@ -970,4 +970,32 @@ class TickTickClient(BaseAPIClient):
             headers=self._get_headers(),
             json_data=project_data,
         )
+    
+    async def delete_project(self, project_id: str) -> bool:
+        """
+        Delete a project
+        
+        According to TickTick API documentation:
+        DELETE /open/v1/project/{projectId}
+        
+        Args:
+            project_id: Project ID (required)
+            
+        Returns:
+            True if successful
+        """
+        if not self.access_token:
+            await self.authenticate()
+        
+        if not project_id:
+            raise ValueError("Project ID is required for deletion")
+        
+        # According to TickTick API documentation:
+        # DELETE /open/v1/project/{projectId}
+        await self.delete(
+            endpoint=f"/open/{TICKTICK_API_VERSION}/project/{project_id}",
+            headers=self._get_headers(),
+        )
+        
+        return True
 

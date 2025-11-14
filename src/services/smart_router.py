@@ -328,6 +328,9 @@ class SmartRouter:
         elif group.type == ActionType.CREATE_PROJECT:
             # Create project operations are single by nature
             return await self._execute_create_project(group.operations[0], context)
+        elif group.type == ActionType.DELETE_PROJECT:
+            # Delete project operations are single by nature
+            return await self._execute_delete_project(group.operations[0], context)
         else:
             raise ValueError(f"Unknown operation type: {group.type}")
     
@@ -774,6 +777,27 @@ class SmartRouter:
         # Note: project_id is not needed in context for create_project
         # as it's a standalone operation that doesn't depend on other operations
         # The result message already contains the project ID
+        
+        return result
+    
+    async def _execute_delete_project(
+        self,
+        operation: Operation,
+        context: Dict[str, Any],
+    ) -> str:
+        """Execute delete_project operation"""
+        from src.models.command import ParsedCommand
+        
+        command = ParsedCommand(
+            action=ActionType.DELETE_PROJECT,
+            project_id=operation.params.get("projectId"),
+            project_name=operation.params.get("projectName"),
+        )
+        
+        result = await self.project_manager.delete_project(command)
+        
+        # Note: project_id is not needed in context for delete_project
+        # as it's a standalone operation that doesn't depend on other operations
         
         return result
     

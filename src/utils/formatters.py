@@ -179,6 +179,19 @@ def format_project_created(project: Dict[str, Any]) -> str:
     return message
 
 
+def format_project_deleted(project_name: str) -> str:
+    """
+    Format project deletion confirmation message
+    
+    Args:
+        project_name: Project name
+        
+    Returns:
+        Formatted message
+    """
+    return f"✓ Проект '{project_name}' удален"
+
+
 def format_date_for_user(date: Union[datetime, str]) -> str:
     """
     Format date for user-friendly display

@@ -29,6 +29,7 @@ class PromptManager:
 - bulk_move: Массовый перенос задач
 - bulk_add_tags: Массовое добавление тегов
 - create_project: Создание нового проекта/списка (например, "Создай список Работа", "Создай проект Личное")
+- delete_project: Удаление проекта/списка (например, "Удали проект Работа", "Удали список Покупки")
 
 ФОРМАТ ОТВЕТА:
 
@@ -49,7 +50,8 @@ class PromptManager:
   "period": "week|month|year|today|tomorrow",
   "startDate": "начальная дата для фильтрации в ISO 8601 с timezone UTC+3",
   "endDate": "конечная дата для фильтрации в ISO 8601 с timezone UTC+3",
-  "projectName": "название проекта (обязательно для create_project)",
+  "projectName": "название проекта (обязательно для create_project, опционально для delete_project)",
+  "projectId": "ID проекта (опционально для delete_project, если указано projectName - необязательно)",
   "projectColor": "цвет проекта (опционально, например, '#F18181')",
   "projectViewMode": "режим отображения (опционально: 'list', 'kanban', 'timeline')",
   "projectKind": "тип проекта (опционально: 'TASK', 'NOTE')"
@@ -324,6 +326,8 @@ class PromptManager:
 - "Создай список Работа" → {"action": "create_project", "projectName": "Работа"}
 - "Создай проект Личное" → {"action": "create_project", "projectName": "Личное"}
 - "Создай список Покупки" → {"action": "create_project", "projectName": "Покупки"}
+- "Удали проект Работа" → {"action": "delete_project", "projectName": "Работа"}
+- "Удали список Покупки" → {"action": "delete_project", "projectName": "Покупки"}
 - "Перенеси задачу Z в список Работа" → {"action": "move_task", "title": "Z", "targetProjectId": "inbox123456"}
 - "Перенеси задачу опубликовать проект в секцию 'в процессе'" → {"action": "move_task", "title": "опубликовать проект", "targetColumnId": "ID_КОЛОНКИ_В_ПРОЦЕССЕ_ИЗ_КОНТЕКСТА"}
 
@@ -640,6 +644,8 @@ class PromptManager:
 - list_tasks: Просмотр задач
 - bulk_move: Массовый перенос задач
 - bulk_add_tags: Массовое добавление тегов
+- create_project: Создание нового проекта/списка
+- delete_project: Удаление проекта/списка
 
 ФОРМАТ ОТВЕТА - верни ТОЛЬКО валидный JSON без дополнительных комментариев.
 
@@ -873,6 +879,35 @@ class PromptManager:
   "taskId": "task_123",
   "targetProjectId": "inbox789012"
 }""",
+            
+            "delete_project": """ПРИМЕР для delete_project:
+Команда: "Удали проект Работа"
+Данные: {"projects": {"Работа": {"id": "inbox123456", "name": "Работа"}}}
+Ответ:
+{
+  "action": "delete_project",
+  "projectName": "Работа",
+  "projectId": "inbox123456"
+}
+
+ПРИМЕР 2 для delete_project:
+Команда: "Удали список Покупки"
+Данные: {"projects": {"Покупки": {"id": "inbox789012", "name": "Покупки"}}}
+Ответ:
+{
+  "action": "delete_project",
+  "projectName": "Покупки",
+  "projectId": "inbox789012"
+}
+
+ВАЖНО - КОГДА ИСПОЛЬЗОВАТЬ delete_project:
+1. Пользователь говорит "удали проект X" → delete_project
+2. Пользователь говорит "удали список X" → delete_project
+3. Пользователь говорит "удалить проект X" → delete_project
+4. Пользователь говорит "удалить список X" → delete_project
+
+ВАЖНО: Для delete_project нужно указать либо projectName (название проекта), либо projectId (ID проекта).
+Если указано projectName, система найдет проект по названию из контекста и использует его ID.""",
             
             "add_tags": """ПРИМЕР для add_tags:
 Команда: "Добавь тег важное к задаче купить молоко"

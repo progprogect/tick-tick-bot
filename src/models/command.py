@@ -24,6 +24,7 @@ class ActionType(str, Enum):
     BULK_ADD_TAGS = "bulk_add_tags"
     LIST_TASKS = "list_tasks"  # Просмотр задач
     CREATE_PROJECT = "create_project"  # Создание проекта
+    DELETE_PROJECT = "delete_project"  # Удаление проекта
 
 
 class FieldModifier(str, Enum):
@@ -93,6 +94,7 @@ class ParsedCommand(BaseModel):
     limit: Optional[int] = None  # Limit number of tasks to show
     sort_by: Optional[str] = Field(None, alias="sortBy")  # "createdTime", "dueDate", etc.
     error: Optional[str] = None
+    task_kind: Optional[str] = Field(None, alias="taskKind")  # Тип задачи: "TEXT" (по умолчанию), "NOTE", "CHECKLIST"
     # Project fields
     project_name: Optional[str] = Field(None, alias="projectName")  # Название проекта
     project_color: Optional[str] = Field(None, alias="projectColor")  # Цвет проекта
