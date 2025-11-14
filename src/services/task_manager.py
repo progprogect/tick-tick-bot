@@ -423,9 +423,19 @@ class TaskManager:
                 
                 self.logger.debug(f"Adding recurrence to task: repeatFlag={repeat_flag}, startDate={start_date}")
             
-            # If no fields to update, return error
+            # If no fields to update, check if this might be a complete_task command
+            # (fallback for cases where GPT incorrectly parsed complete_task as update_task)
             if not update_data:
-                raise ValueError("Не указаны параметры для обновления")
+                # If we have task_id or title, this might be a complete_task command
+                if command.task_id or command.title:
+                    self.logger.warning(
+                        f"update_task called with no update fields for task '{command.title or command.task_id}'. "
+                        f"This might be a complete_task command. Redirecting to complete_task."
+                    )
+                    # Redirect to complete_task
+                    return await self.complete_task(command)
+                else:
+                    raise ValueError("Не указаны параметры для обновления")
             
             # Update task using correct API endpoint (POST /open/v1/task/{taskId})
             # Extract repeatFlag from update_data to pass as explicit parameter

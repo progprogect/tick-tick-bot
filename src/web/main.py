@@ -109,6 +109,9 @@ class TestBot:
             elif action == ActionType.DELETE_TASK:
                 return await self.task_manager.delete_task(parsed_command)
             
+            elif action == ActionType.COMPLETE_TASK:
+                return await self.task_manager.complete_task(parsed_command)
+            
             elif action == ActionType.MOVE_TASK:
                 return await self.task_manager.move_task(parsed_command)
             
