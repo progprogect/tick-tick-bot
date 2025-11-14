@@ -12,7 +12,6 @@ from src.services.prompt_manager import PromptManager
 from src.services.data_fetcher import DataFetcher
 from src.models.command import ParsedCommand
 from src.utils.logger import logger
-from src.utils.date_utils import get_current_date_str
 
 
 class GPTService:
@@ -59,20 +58,11 @@ class GPTService:
                 raise ValueError("TickTick client not available for data fetching")
             
             # Stage 1: Determine data requirements
-            self.logger.info(f"[Stage 1] ===== DETERMINING DATA REQUIREMENTS =====")
-            self.logger.info(f"[Stage 1] Original command: '{command}'")
+            self.logger.info("[Stage 1] Determining data requirements...")
             requirements = await self.determine_data_requirements(command)
             action_type = requirements.get("action_type", "create_task")
             self.logger.info(f"[Stage 1] Action type determined: {action_type}")
-            self.logger.info(f"[Stage 1] Requirements: {requirements}")
-            
-            # Log task titles that GPT extracted
-            required_data = requirements.get("required_data", {})
-            task_titles = required_data.get("task_by_title", [])
-            if task_titles:
-                self.logger.info(f"[Stage 1] GPT extracted task titles: {task_titles}")
-            else:
-                self.logger.info(f"[Stage 1] GPT did not extract any task titles")
+            self.logger.debug(f"[Stage 1] Requirements: {requirements}")
             
             self.logger.info(f"[Stage 2] Fetching data for requirements...")
             
@@ -122,32 +112,9 @@ class GPTService:
             self.logger.info(f"[Stage 2] Data fetched successfully")
             
             # Stage 3: Parse command with data
-            self.logger.info(f"[Stage 3] ===== PARSING COMMAND WITH DATA =====")
             parsed_command = await self.parse_command_with_data(
                 command, fetched_data, action_type
             )
-            
-            # Log what GPT parsed
-            if parsed_command.title:
-                self.logger.warning(
-                    f"[Stage 3] GPT used 'title' instead of 'taskId': '{parsed_command.title}' "
-                    f"(should use taskId from all_tasks list!)"
-                )
-            if parsed_command.task_id:
-                self.logger.info(f"[Stage 3] ✓ GPT correctly used taskId: '{parsed_command.task_id}'")
-            if parsed_command.operations:
-                for i, op in enumerate(parsed_command.operations):
-                    if op.task_identifier:
-                        if op.task_identifier.type == "id":
-                            self.logger.info(
-                                f"[Stage 3] ✓ GPT correctly used taskId in operation {i+1}: "
-                                f"'{op.task_identifier.value}'"
-                            )
-                        elif op.task_identifier.type == "title":
-                            self.logger.warning(
-                                f"[Stage 3] ✗ GPT used 'title' instead of 'id' in operation {i+1}: "
-                                f"'{op.task_identifier.value}' (should use taskId from all_tasks list!)"
-                            )
             
             self.logger.info(f"[Multi-stage] Command parsing completed successfully")
             
@@ -397,7 +364,7 @@ class GPTService:
 ВАЖНО для list_tasks:
 - Если в ПОЛУЧЕННЫХ ДАННЫХ есть "ЗАДАЧИ ПО ФИЛЬТРАМ", это означает что пользователь запросил задачи на конкретную дату
 - В этом случае ОБЯЗАТЕЛЬНО используй startDate и endDate для этой даты в JSON ответе
-- Если команда содержит "на сегодня" или "сегодня", используй текущую дату ({get_current_date_str()})
+- Если команда содержит "на сегодня" или "сегодня", используй текущую дату ({datetime.now().strftime('%Y-%m-%d')})
 - Если команда содержит "на завтра" или "завтра", используй завтрашнюю дату"""
             
             messages = [
@@ -467,41 +434,23 @@ class GPTService:
             Error message if data is missing, None otherwise
         """
         required_data = requirements.get("required_data", {})
+        action_type = requirements.get("action_type", "")
         missing = []
         
-        # Check tasks by title - НЕ проверяем, если есть список всех задач
-        # GPT сам найдет задачу в списке всех задач
-        all_tasks = fetched_data.get("all_tasks", [])
-        if not all_tasks:
-            # Если нет списка всех задач, проверяем как раньше
-            task_titles = required_data.get("task_by_title", [])
-            for title in task_titles:
-                if title not in fetched_data.get("tasks", {}) or fetched_data["tasks"][title] is None:
-                    missing.append(f"Задача '{title}'")
-        else:
-            # Если есть список всех задач, GPT сам найдет задачу - не проверяем
-            self.logger.info(
-                f"[CheckMissingData] Skipping task check - GPT will find task in all_tasks list "
-                f"({len(all_tasks)} tasks available)"
-            )
+        # Check tasks by title
+        task_titles = required_data.get("task_by_title", [])
+        for title in task_titles:
+            if title not in fetched_data.get("tasks", {}) or fetched_data["tasks"][title] is None:
+                missing.append(f"Задача '{title}'")
         
-        # Check projects by name - НЕ проверяем для create_project и delete_project
-        # Для create_project название проекта - это название НОВОГО проекта, не существующего
-        # Для delete_project проверка наличия проекта выполняется в ProjectManager.delete_project()
-        action_type = requirements.get("action_type", "")
-        if action_type not in ["create_project", "delete_project"]:
+        # Check projects by name (skip for delete_project and create_project)
+        # For delete_project: project search is done in ProjectManager.delete_project()
+        # For create_project: project is new, doesn't need to be found
+        if action_type not in ["delete_project", "create_project"]:
             project_names = required_data.get("project_by_name", [])
             for name in project_names:
                 if name not in fetched_data.get("projects", {}) or fetched_data["projects"][name] is None:
                     missing.append(f"Проект '{name}'")
-        else:
-            # Для create_project и delete_project не проверяем наличие проекта
-            # create_project - создает новый проект, не нужно проверять существование
-            # delete_project - проверка наличия выполняется в ProjectManager
-            self.logger.info(
-                f"[CheckMissingData] Skipping project check for {action_type} - "
-                f"project existence check not needed"
-            )
         
         # Check task data
         task_ids = required_data.get("task_data", [])
@@ -526,33 +475,9 @@ class GPTService:
         """
         lines = []
         
-        # ALWAYS include all tasks first (for GPT to see all available tasks)
-        all_tasks = fetched_data.get("all_tasks", [])
-        if all_tasks:
-            lines.append("ВСЕ ЗАДАЧИ ПОЛЬЗОВАТЕЛЯ (ОБЯЗАТЕЛЬНО используй этот список для поиска задач):")
-            # Показываем все задачи (модель gpt-4o поддерживает до 128k токенов)
-            for task in all_tasks:
-                task_id = task.get("id", "N/A")
-                title = task.get("title", "Без названия")
-                project_id = task.get("projectId", "N/A")
-                status = task.get("status", 0)
-                status_text = "Завершена" if status == 2 else "Активна"
-                lines.append(f"  - ID: {task_id}, Название: '{title}', Проект: {project_id}, Статус: {status_text}")
-            lines.append(f"Всего задач в списке: {len(all_tasks)}")
-            lines.append("")
-            lines.append("КРИТИЧЕСКИ ВАЖНО - ИСПОЛЬЗОВАНИЕ taskId:")
-            lines.append("1. Если команда содержит название задачи, НАЙДИ задачу в списке выше по названию")
-            lines.append("2. Если нашел задачу - ОБЯЗАТЕЛЬНО используй её ID в поле 'taskId' (НЕ 'title'!)")
-            lines.append("3. Для простых команд: {\"action\": \"update_task\", \"taskId\": \"НАЙДЕННЫЙ_ID\", ...}")
-            lines.append("4. Для composite команд: {\"task_identifier\": {\"type\": \"id\", \"value\": \"НАЙДЕННЫЙ_ID\"}, ...}")
-            lines.append("5. НИКОГДА не используй 'title' если есть список всех задач - только 'taskId'!")
-            lines.append("6. Если пользователь сказал 'задача X на завтра', ищи 'X' в списке и используй её ID")
-            lines.append("7. Для поиска используй частичное совпадение названий (регистр не важен)")
-            lines.append("")
-        
-        # Format tasks (specific tasks found by title)
+        # Format tasks
         if fetched_data.get("tasks"):
-            lines.append("НАЙДЕННЫЕ ЗАДАЧИ (по запросу):")
+            lines.append("НАЙДЕННЫЕ ЗАДАЧИ:")
             for title, task in fetched_data["tasks"].items():
                 if task:
                     lines.append(f"  - '{title}': {{id: '{task.get('id')}', projectId: '{task.get('projectId')}', title: '{task.get('title')}'}}")
@@ -568,16 +493,6 @@ class GPTService:
                     lines.append(f"  - '{name}': {{id: '{project.get('id')}', name: '{project.get('name')}'}}")
                 else:
                     lines.append(f"  - '{name}': НЕ НАЙДЕН")
-            lines.append("")
-        
-        # Format columns (for Kanban projects)
-        if fetched_data.get("columns"):
-            lines.append("НАЙДЕННЫЕ КОЛОНКИ/СЕКЦИИ (для Kanban проектов):")
-            for name, column in fetched_data["columns"].items():
-                if column:
-                    lines.append(f"  - '{name}': {{id: '{column.get('id')}', name: '{column.get('name')}', projectId: '{column.get('projectId')}'}}")
-                else:
-                    lines.append(f"  - '{name}': НЕ НАЙДЕНА")
             lines.append("")
         
         # Format task data
