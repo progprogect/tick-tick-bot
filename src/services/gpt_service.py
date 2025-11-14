@@ -484,11 +484,23 @@ class GPTService:
                 f"({len(all_tasks)} tasks available)"
             )
         
-        # Check projects by name
-        project_names = required_data.get("project_by_name", [])
-        for name in project_names:
-            if name not in fetched_data.get("projects", {}) or fetched_data["projects"][name] is None:
-                missing.append(f"Проект '{name}'")
+        # Check projects by name - НЕ проверяем для create_project и delete_project
+        # Для create_project название проекта - это название НОВОГО проекта, не существующего
+        # Для delete_project проверка наличия проекта выполняется в ProjectManager.delete_project()
+        action_type = requirements.get("action_type", "")
+        if action_type not in ["create_project", "delete_project"]:
+            project_names = required_data.get("project_by_name", [])
+            for name in project_names:
+                if name not in fetched_data.get("projects", {}) or fetched_data["projects"][name] is None:
+                    missing.append(f"Проект '{name}'")
+        else:
+            # Для create_project и delete_project не проверяем наличие проекта
+            # create_project - создает новый проект, не нужно проверять существование
+            # delete_project - проверка наличия выполняется в ProjectManager
+            self.logger.info(
+                f"[CheckMissingData] Skipping project check for {action_type} - "
+                f"project existence check not needed"
+            )
         
         # Check task data
         task_ids = required_data.get("task_data", [])

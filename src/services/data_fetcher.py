@@ -232,17 +232,30 @@ class DataFetcher:
                 self.logger.warning(f"[DataFetcher] Task '{title}' not found")
         
         # Fetch projects by name
+        # НЕ запрашиваем проекты для create_project и delete_project
+        # Для create_project название проекта - это название НОВОГО проекта, не существующего
+        # Для delete_project проверка наличия проекта выполняется в ProjectManager.delete_project()
+        action_type = requirements.get("action_type", "")
         project_names = required_data.get("project_by_name", [])
-        self.logger.info(f"[DataFetcher] Fetching {len(project_names)} projects by name: {project_names}")
-        for name in project_names:
-            self.logger.debug(f"[DataFetcher] Fetching project '{name}'")
-            project = await self.fetch_project_by_name(name)
-            if project:
-                fetched_data["projects"][name] = project
-                self.logger.info(f"[DataFetcher] Project '{name}' found: {project.get('id')}")
-            else:
-                fetched_data["projects"][name] = None
-                self.logger.warning(f"[DataFetcher] Project '{name}' not found")
+        
+        if action_type in ["create_project", "delete_project"]:
+            # Для create_project и delete_project не нужно искать проекты
+            self.logger.info(
+                f"[DataFetcher] Skipping project fetch for {action_type} - "
+                f"project existence check not needed"
+            )
+        else:
+            # Для других действий ищем проекты
+            self.logger.info(f"[DataFetcher] Fetching {len(project_names)} projects by name: {project_names}")
+            for name in project_names:
+                self.logger.debug(f"[DataFetcher] Fetching project '{name}'")
+                project = await self.fetch_project_by_name(name)
+                if project:
+                    fetched_data["projects"][name] = project
+                    self.logger.info(f"[DataFetcher] Project '{name}' found: {project.get('id')}")
+                else:
+                    fetched_data["projects"][name] = None
+                    self.logger.warning(f"[DataFetcher] Project '{name}' not found")
         
         # Fetch columns by name (requires project_id)
         column_names = required_data.get("column_by_name", [])
