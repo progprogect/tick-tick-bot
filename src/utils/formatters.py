@@ -156,3 +156,37 @@ def format_analytics(analytics: Dict[str, Any]) -> str:
     
     return message
 
+
+def format_project_created(project: Dict[str, Any]) -> str:
+    """
+    Format project creation confirmation message
+    
+    Args:
+        project: Project data dictionary
+        
+    Returns:
+        Formatted message
+    """
+    name = project.get("name", "Проект")
+    project_id = project.get("id", "")
+    
+    message = f"✓ Проект '{name}' создан"
+    
+    if project_id:
+        message += f" (ID: {project_id})"
+    
+    return message
+
+
+def format_project_deleted(project_name: str) -> str:
+    """
+    Format project deletion confirmation message
+    
+    Args:
+        project_name: Project name
+        
+    Returns:
+        Formatted message
+    """
+    return f"✓ Проект '{project_name}' удален"
+
