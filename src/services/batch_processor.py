@@ -73,7 +73,7 @@ class BatchProcessor:
         Move overdue tasks from one date to another
         
         Args:
-            from_date: Source date
+            from_date: Source date (deprecated, kept for backward compatibility)
             to_date: Target date
             target_project_id: Target project ID (optional)
             
@@ -81,29 +81,61 @@ class BatchProcessor:
             Number of moved tasks
         """
         try:
-            # Get tasks from source date
-            # Normalize dates: use start of day for from_date, end of day for end_date
-            from datetime import time as dt_time
-            from_date_start = datetime.combine(from_date.date(), dt_time.min)
-            from_date_end = datetime.combine(from_date.date(), dt_time.max)
+            from datetime import timezone, timedelta
+            from src.config.constants import USER_TIMEZONE_OFFSET
             
+            # Get current time with user timezone for filtering overdue tasks
+            user_tz = timezone(timedelta(hours=USER_TIMEZONE_OFFSET))
+            now = datetime.now(user_tz)
+            
+            # Get all incomplete tasks (without date filter to find all overdue tasks)
             # Note: GET endpoint may not work, so we return 0 if it fails
             try:
                 tasks = await self.client.get_tasks(
-                    start_date=from_date_start.isoformat() + '+00:00',
-                    end_date=from_date_end.isoformat() + '+00:00',
                     status=0,  # Incomplete only
+                    # Don't filter by date - we need to find all overdue tasks regardless of their date
                 )
             except Exception as get_error:
                 # GET endpoint doesn't work, return 0 with informative message
                 self.logger.warning(f"Cannot get tasks from TickTick API: {get_error}")
                 return 0
             
-            # Filter overdue tasks
-            overdue_tasks = [
-                t for t in tasks
-                if t.get("status") == 0 and t.get("dueDate")
-            ]
+            # Filter overdue tasks: tasks with dueDate < current date
+            overdue_tasks = []
+            for task in tasks:
+                if task.get("status") == 0 and task.get("dueDate"):
+                    try:
+                        # Parse task due date
+                        task_due_date_str = task["dueDate"]
+                        # Handle different date formats
+                        if 'Z' in task_due_date_str:
+                            task_due_date_str = task_due_date_str.replace('Z', '+00:00')
+                        elif '+' not in task_due_date_str and '-' not in task_due_date_str[-6:]:
+                            # If no timezone info, assume UTC
+                            task_due_date_str = task_due_date_str + '+00:00'
+                        
+                        task_due_date = datetime.fromisoformat(task_due_date_str)
+                        
+                        # Ensure timezone-aware
+                        if task_due_date.tzinfo is None:
+                            task_due_date = task_due_date.replace(tzinfo=timezone.utc)
+                        
+                        # Convert to user timezone for comparison
+                        task_due_date = task_due_date.astimezone(user_tz)
+                        
+                        # Check if task is overdue: dueDate < current date/time
+                        # Compare only dates (not time) for overdue detection
+                        if task_due_date.date() < now.date():
+                            overdue_tasks.append(task)
+                            self.logger.debug(
+                                f"Found overdue task: {task.get('title', 'N/A')} "
+                                f"(due: {task_due_date.date()}, now: {now.date()})"
+                            )
+                    except Exception as parse_error:
+                        self.logger.warning(
+                            f"Failed to parse dueDate for task {task.get('id', 'unknown')}: {parse_error}"
+                        )
+                        continue
             
             if not overdue_tasks:
                 self.logger.info("No overdue tasks found")
