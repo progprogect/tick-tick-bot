@@ -2,14 +2,14 @@
 TickTick API client
 """
 
+import asyncio
 import base64
 from typing import Optional, Dict, Any, List
-from datetime import datetime, timezone, timedelta
+from datetime import datetime
 from src.api.base_client import BaseAPIClient
 from src.config.settings import settings
-from src.config.constants import TICKTICK_API_BASE_URL, TICKTICK_API_VERSION, USER_TIMEZONE_OFFSET, USER_TIMEZONE_STR
+from src.config.constants import TICKTICK_API_BASE_URL, TICKTICK_API_VERSION
 from src.utils.logger import logger
-from src.utils.date_utils import get_current_datetime, USER_TIMEZONE
 
 
 def _format_date_for_ticktick(date_str: str) -> str:
@@ -17,51 +17,27 @@ def _format_date_for_ticktick(date_str: str) -> str:
     Format date string to TickTick API format: "yyyy-MM-dd'T'HH:mm:ssZ"
     Example: "2019-11-13T03:00:00+0000"
     
-    ВАЖНО: Все время интерпретируется как UTC+3 (локальное время пользователя).
-    При отправке в API конвертируется в UTC.
-    
     Args:
         date_str: Date string in ISO format or other formats
         
     Returns:
-        Formatted date string for TickTick API (в UTC)
+        Formatted date string for TickTick API
     """
     if not date_str:
         return ""
     
     try:
-        # Create UTC+3 timezone
-        user_tz = timezone(timedelta(hours=USER_TIMEZONE_OFFSET))
-        
         # Try to parse ISO format
         if "T" in date_str:
             # Already has time component
-            # Try to parse with timezone
-            try:
-                dt = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
-            except ValueError:
-                # If parsing fails, try without timezone
-                dt = datetime.fromisoformat(date_str)
-                # If naive datetime, assume it's in UTC+3 (user's local time)
-                if dt.tzinfo is None:
-                    dt = dt.replace(tzinfo=user_tz)
+            dt = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
         else:
-            # Date only, assume midnight in UTC+3
+            # Date only, assume midnight
             dt = datetime.fromisoformat(date_str)
-            if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=user_tz)
         
-        # If datetime has timezone info, convert to UTC
-        # If no timezone, it's already in user_tz (UTC+3)
-        if dt.tzinfo is not None:
-            # Convert to UTC
-            dt_utc = dt.astimezone(timezone.utc)
-        else:
-            # Should not happen after our checks, but just in case
-            dt_utc = dt.replace(tzinfo=user_tz).astimezone(timezone.utc)
-        
-        # Format to TickTick API format: "yyyy-MM-dd'T'HH:mm:ss+0000" (UTC)
-        formatted = dt_utc.strftime("%Y-%m-%dT%H:%M:%S+0000")
+        # Format to TickTick API format: "yyyy-MM-dd'T'HH:mm:ssZ"
+        # Remove microseconds and format with timezone
+        formatted = dt.strftime("%Y-%m-%dT%H:%M:%S+0000")
         return formatted
     except Exception as e:
         logger.warning(f"Failed to format date '{date_str}': {e}")
@@ -231,8 +207,6 @@ class TickTickClient(BaseAPIClient):
         repeat_flag: Optional[str] = None,
         reminders: Optional[List[str]] = None,
         start_date: Optional[str] = None,
-        kind: Optional[str] = None,
-        items: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
         """
         Create a new task
@@ -248,8 +222,6 @@ class TickTickClient(BaseAPIClient):
             repeat_flag: Recurring rules in RRULE format (e.g., "RRULE:FREQ=DAILY;INTERVAL=1")
             reminders: List of reminder triggers (e.g., ["TRIGGER:P0DT9H0M0S", "TRIGGER:PT0S"])
             start_date: Start date in ISO 8601 format (required for recurring tasks)
-            kind: Task kind ("TEXT", "NOTE", "CHECKLIST")
-            items: List of checklist items (for CHECKLIST tasks)
             
         Returns:
             Created task data
@@ -285,12 +257,6 @@ class TickTickClient(BaseAPIClient):
         
         if reminders:
             task_data["reminders"] = reminders
-        
-        if kind:
-            task_data["kind"] = kind
-        
-        if items:
-            task_data["items"] = items
         
         return await self.post(
             endpoint=f"/open/{TICKTICK_API_VERSION}/task",
@@ -345,7 +311,6 @@ class TickTickClient(BaseAPIClient):
         task_id: str,
         title: Optional[str] = None,
         project_id: Optional[str] = None,
-        column_id: Optional[str] = None,
         due_date: Optional[str] = None,
         priority: Optional[int] = None,
         status: Optional[int] = None,
@@ -362,7 +327,6 @@ class TickTickClient(BaseAPIClient):
             task_id: Task ID
             title: New title
             project_id: New project ID
-            column_id: New column ID (for Kanban projects)
             due_date: New due date
             priority: New priority
             status: New status (0: Incomplete, 1: Completed)
@@ -388,9 +352,6 @@ class TickTickClient(BaseAPIClient):
         
         if project_id is not None:
             task_data["projectId"] = project_id
-        
-        if column_id is not None:
-            task_data["columnId"] = column_id
         
         if due_date is not None:
             task_data["dueDate"] = _format_date_for_ticktick(due_date)
@@ -576,84 +537,10 @@ class TickTickClient(BaseAPIClient):
                 # First, get list of projects
                 try:
                     projects = await self.get_projects()
-                    self.logger.info(f"[get_tasks] Retrieved {len(projects)} projects from API")
                     
-                    # Log project details for debugging
-                    for project in projects[:5]:  # Log first 5
-                        self.logger.debug(
-                            f"[get_tasks] Project: {project.get('name', 'N/A')} "
-                            f"(id: {project.get('id', 'N/A')}, "
-                            f"kind: {project.get('kind', 'N/A')}, "
-                            f"closed: {project.get('closed', False)})"
-                        )
-                    
-                    # First, get tasks from Inbox (Inbox is not in the projects list)
-                    try:
-                        self.logger.debug("[get_tasks] Fetching tasks from Inbox...")
-                        inbox_response = await self.get(
-                            endpoint=f"/open/{TICKTICK_API_VERSION}/project/inbox/data",
-                            headers=self._get_headers(),
-                        )
-                        
-                        if isinstance(inbox_response, dict) and "tasks" in inbox_response:
-                            inbox_tasks = inbox_response["tasks"]
-                            if isinstance(inbox_tasks, list):
-                                # Sort by timestamp from ID (more reliable than sortOrder)
-                                # ObjectId contains timestamp in first 8 hex characters
-                                def get_task_timestamp(task):
-                                    task_id = task.get("id", "")
-                                    if task_id and len(task_id) >= 8:
-                                        try:
-                                            # Extract timestamp from first 8 hex chars
-                                            hex_timestamp = task_id[:8]
-                                            timestamp = int(hex_timestamp, 16)
-                                            return timestamp
-                                        except:
-                                            pass
-                                    # Fallback to sortOrder if ID parsing fails
-                                    return task.get("sortOrder", 0)
-                                
-                                sorted_inbox_tasks = sorted(
-                                    inbox_tasks,
-                                    key=get_task_timestamp,
-                                    reverse=True  # Higher timestamp = newer task
-                                )
-                                # Take first 99 (most recent)
-                                inbox_tasks = sorted_inbox_tasks[:99]
-                                all_tasks.extend(inbox_tasks)
-                                self.logger.info(
-                                    f"[get_tasks] Retrieved {len(inbox_tasks)} most recent tasks from Inbox "
-                                    f"(sorted by sortOrder, most recent first)"
-                                )
-                            else:
-                                self.logger.warning(
-                                    f"[get_tasks] Invalid tasks format from Inbox: {type(inbox_tasks)}"
-                                )
-                        else:
-                            self.logger.debug(
-                                f"[get_tasks] No tasks in Inbox response "
-                                f"(response keys: {list(inbox_response.keys()) if isinstance(inbox_response, dict) else 'not a dict'})"
-                            )
-                    except Exception as e:
-                        self.logger.warning(
-                            f"[get_tasks] Failed to get tasks from Inbox: {e}"
-                        )
-                        # Continue even if Inbox fails
-                    
-                    # Then, get tasks from all regular projects
                     for project in projects:
                         project_id_val = project.get("id")
-                        project_name = project.get("name", "N/A")
-                        project_kind = project.get("kind", "TASK")
-                        project_closed = project.get("closed", False)
-                        
                         if not project_id_val:
-                            self.logger.warning(f"[get_tasks] Project without ID: {project}")
-                            continue
-                        
-                        # Skip NOTE projects (they don't have tasks)
-                        if project_kind == "NOTE":
-                            self.logger.debug(f"[get_tasks] Skipping NOTE project: {project_name}")
                             continue
                         
                         try:
@@ -665,76 +552,12 @@ class TickTickClient(BaseAPIClient):
                             if isinstance(response, dict) and "tasks" in response:
                                 tasks = response["tasks"]
                                 if isinstance(tasks, list):
-                                    # Sort by timestamp from ID (more reliable than sortOrder)
-                                    # ObjectId contains timestamp in first 8 hex characters
-                                    def get_task_timestamp(task):
-                                        task_id = task.get("id", "")
-                                        if task_id and len(task_id) >= 8:
-                                            try:
-                                                # Extract timestamp from first 8 hex chars
-                                                hex_timestamp = task_id[:8]
-                                                timestamp = int(hex_timestamp, 16)
-                                                return timestamp
-                                            except:
-                                                pass
-                                        # Fallback to sortOrder if ID parsing fails
-                                        return task.get("sortOrder", 0)
-                                    
-                                    sorted_tasks = sorted(
-                                        tasks,
-                                        key=get_task_timestamp,
-                                        reverse=True  # Higher timestamp = newer task
-                                    )
-                                    # Take first 99 (most recent)
-                                    tasks = sorted_tasks[:99]
                                     all_tasks.extend(tasks)
-                                    self.logger.debug(
-                                        f"[get_tasks] Retrieved {len(tasks)} most recent tasks from project "
-                                        f"'{project_name}' (id: {project_id_val}, closed: {project_closed}, "
-                                        f"sorted by sortOrder, most recent first)"
-                                    )
-                                else:
-                                    self.logger.warning(
-                                        f"[get_tasks] Invalid tasks format from project {project_name}: {type(tasks)}"
-                                    )
-                            else:
-                                self.logger.warning(
-                                    f"[get_tasks] No tasks in response from project {project_name} "
-                                    f"(response keys: {list(response.keys()) if isinstance(response, dict) else 'not a dict'})"
-                                )
                         except Exception as e:
-                            self.logger.warning(
-                                f"[get_tasks] Failed to get tasks from project '{project_name}' "
-                                f"(id: {project_id_val}): {e}"
-                            )
+                            self.logger.warning(f"Failed to get tasks from project {project_id_val}: {e}")
                             continue
-                    
-                    # Sort all tasks by timestamp from ID (more reliable than sortOrder)
-                    # ObjectId contains timestamp in first 8 hex characters
-                    def get_task_timestamp(task):
-                        task_id = task.get("id", "")
-                        if task_id and len(task_id) >= 8:
-                            try:
-                                # Extract timestamp from first 8 hex chars
-                                hex_timestamp = task_id[:8]
-                                timestamp = int(hex_timestamp, 16)
-                                return timestamp
-                            except:
-                                pass
-                        # Fallback to sortOrder if ID parsing fails
-                        return task.get("sortOrder", 0)
-                    
-                    all_tasks = sorted(
-                        all_tasks,
-                        key=get_task_timestamp,
-                        reverse=True  # Higher timestamp = newer task
-                    )
-                    self.logger.info(
-                        f"[get_tasks] Total tasks retrieved from all projects: {len(all_tasks)} "
-                        f"(sorted by sortOrder across all projects, most recent first)"
-                    )
                 except Exception as e:
-                    self.logger.error(f"[get_tasks] Failed to get projects: {e}", exc_info=True)
+                    self.logger.warning(f"Failed to get projects: {e}")
                     return []
             
             # Filter by status if specified
@@ -847,6 +670,82 @@ class TickTickClient(BaseAPIClient):
             self.logger.warning(f"Failed to get tasks: {e}")
             return []
     
+    async def verify_task_in_project(
+        self,
+        task_id: str,
+        project_id: str,
+        max_retries: int = 3
+    ) -> bool:
+        """
+        Verify that task is in the specified project with retry logic
+        
+        Uses direct GET request to check task location, which is more reliable
+        than searching through task lists (which may be cached or limited).
+        
+        Args:
+            task_id: Task ID to verify
+            project_id: Project ID where task should be located
+            max_retries: Maximum number of retry attempts (default: 3)
+            
+        Returns:
+            True if task is found in the specified project, False otherwise
+        """
+        if not self.access_token:
+            await self.authenticate()
+        
+        for attempt in range(max_retries):
+            try:
+                task = await self.get(
+                    endpoint=f"/open/{TICKTICK_API_VERSION}/project/{project_id}/task/{task_id}",
+                    headers=self._get_headers(),
+                )
+                
+                if isinstance(task, dict) and task.get("projectId") == project_id:
+                    self.logger.debug(
+                        f"Task {task_id} verified in project {project_id} "
+                        f"(attempt {attempt + 1}/{max_retries})"
+                    )
+                    return True
+                else:
+                    # Task found but in different project
+                    actual_project_id = task.get("projectId") if isinstance(task, dict) else "unknown"
+                    self.logger.warning(
+                        f"Task {task_id} found in project {actual_project_id}, "
+                        f"expected {project_id} (attempt {attempt + 1}/{max_retries})"
+                    )
+                    if attempt < max_retries - 1:
+                        await asyncio.sleep(2 ** attempt)  # 1s, 2s, 4s
+                    else:
+                        return False
+                        
+            except Exception as e:
+                error_msg = str(e)
+                # 404 means task not found in this project (might be in another or not moved yet)
+                # 500 means server error (might be temporary)
+                if "404" in error_msg or "not found" in error_msg.lower():
+                    self.logger.debug(
+                        f"Task {task_id} not found in project {project_id} "
+                        f"(attempt {attempt + 1}/{max_retries}): {error_msg}"
+                    )
+                else:
+                    self.logger.warning(
+                        f"Error verifying task {task_id} in project {project_id} "
+                        f"(attempt {attempt + 1}/{max_retries}): {error_msg}"
+                    )
+                
+                if attempt < max_retries - 1:
+                    # Exponential backoff: 1s, 2s, 4s
+                    wait_time = 2 ** attempt
+                    self.logger.debug(f"Retrying in {wait_time} seconds...")
+                    await asyncio.sleep(wait_time)
+                else:
+                    self.logger.warning(
+                        f"Failed to verify task {task_id} in project {project_id} "
+                        f"after {max_retries} attempts: {error_msg}"
+                    )
+        
+        return False
+    
     async def add_tags(self, task_id: str, tags: List[str]) -> Dict[str, Any]:
         """
         Add tags to task
@@ -877,24 +776,17 @@ class TickTickClient(BaseAPIClient):
         Convert reminder time (ISO 8601) to TickTick TRIGGER format
         
         Args:
-            reminder_time: Reminder time in ISO 8601 format (e.g., "2024-11-05T12:00:00+03:00")
-            Expected to be in UTC+3 timezone
+            reminder_time: Reminder time in ISO 8601 format (e.g., "2024-11-05T12:00:00+00:00")
             
         Returns:
             TRIGGER string (e.g., "TRIGGER:P0DT9H0M0S" for 9 hours before, "TRIGGER:PT0S" for at time)
         """
+        from datetime import datetime, timedelta
+        
         try:
             # Parse reminder time
             reminder_dt = datetime.fromisoformat(reminder_time.replace('Z', '+00:00'))
-            
-            # Ensure reminder is in UTC+3 timezone
-            if reminder_dt.tzinfo is None:
-                reminder_dt = reminder_dt.replace(tzinfo=USER_TIMEZONE)
-            else:
-                reminder_dt = reminder_dt.astimezone(USER_TIMEZONE)
-            
-            # Get current time in UTC+3
-            now = get_current_datetime()
+            now = datetime.now(reminder_dt.tzinfo)
             
             # Calculate difference
             diff = reminder_dt - now
@@ -938,82 +830,4 @@ class TickTickClient(BaseAPIClient):
             return response["projects"]
         else:
             return []
-    
-    async def create_project(
-        self,
-        name: str,
-        color: Optional[str] = None,
-        view_mode: Optional[str] = None,
-        kind: Optional[str] = None,
-        sort_order: Optional[int] = None,
-    ) -> Dict[str, Any]:
-        """
-        Create a new project
-        
-        Args:
-            name: Project name (required)
-            color: Project color (e.g., "#F18181")
-            view_mode: View mode ("list", "kanban", "timeline")
-            kind: Project kind ("TASK", "NOTE")
-            sort_order: Sort order
-            
-        Returns:
-            Created project data
-        """
-        if not self.access_token:
-            await self.authenticate()
-        
-        if not name:
-            raise ValueError("Project name is required")
-        
-        project_data = {
-            "name": name,
-        }
-        
-        # Only add optional parameters if they are provided
-        if color:
-            project_data["color"] = color
-        
-        if view_mode:
-            project_data["viewMode"] = view_mode
-        
-        if kind:
-            project_data["kind"] = kind
-        
-        if sort_order is not None:
-            project_data["sortOrder"] = sort_order
-        
-        return await self.post(
-            endpoint=f"/open/{TICKTICK_API_VERSION}/project",
-            headers=self._get_headers(),
-            json_data=project_data,
-        )
-    
-    async def delete_project(self, project_id: str) -> bool:
-        """
-        Delete a project
-        
-        According to TickTick API documentation:
-        DELETE /open/v1/project/{projectId}
-        
-        Args:
-            project_id: Project ID (required)
-            
-        Returns:
-            True if successful
-        """
-        if not self.access_token:
-            await self.authenticate()
-        
-        if not project_id:
-            raise ValueError("Project ID is required for deletion")
-        
-        # According to TickTick API documentation:
-        # DELETE /open/v1/project/{projectId}
-        await self.delete(
-            endpoint=f"/open/{TICKTICK_API_VERSION}/project/{project_id}",
-            headers=self._get_headers(),
-        )
-        
-        return True
 

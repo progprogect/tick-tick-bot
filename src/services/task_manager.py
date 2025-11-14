@@ -795,50 +795,56 @@ class TaskManager:
             task_data = await self.client.update_task(**update_params)
             self.logger.info(f"Task moved via update_task: {command.task_id} -> {target_project_id}")
             
-            # Wait a bit and verify move
-            import asyncio
-            await asyncio.sleep(2)
+            # Verify move using direct GET request with retry logic
+            self.logger.debug(f"Verifying task move: {command.task_id} -> {target_project_id}")
+            task_verified = await self.client.verify_task_in_project(
+                task_id=command.task_id,
+                project_id=target_project_id,
+                max_retries=3
+            )
             
-            # Verify move by checking target project
-            try:
-                target_tasks = await self.client.get_tasks(project_id=target_project_id)
-                task_moved = any(t.get('id') == command.task_id for t in target_tasks)
+            if task_verified:
+                # Update cache with new project_id and column_id
+                project_name = target_project.get('name', target_project_id) if target_project else target_project_id
+                current_task_info = self.cache.get_task_data(command.task_id)
                 
-                if task_moved:
-                    # Update cache with new project_id and column_id
-                    project_name = target_project.get('name', target_project_id) if target_project else target_project_id
-                    current_task_info = self.cache.get_task_data(command.task_id)
-                    
-                    cache_params = {
-                        "task_id": command.task_id,
-                        "title": current_task_info.get('title', '') if current_task_info else '',
-                        "project_id": target_project_id,
-                        "status": current_task_info.get('status', 'active') if current_task_info else 'active',
-                    }
-                    if target_column_id:
-                        cache_params["column_id"] = target_column_id
-                    
-                    self.cache.save_task(**cache_params)
-                    
-                    if target_column_id:
-                        columns = await self.column_cache.get_columns(target_project_id)
-                        target_column = next((c for c in columns if c.get('id') == target_column_id), None)
-                        column_name = target_column.get('name', '') if target_column else ''
-                        return f"✓ Задача перемещена в список {project_name}, секция '{column_name}'"
-                    else:
-                        return f"✓ Задача перемещена в список {project_name}"
+                cache_params = {
+                    "task_id": command.task_id,
+                    "title": current_task_info.get('title', '') if current_task_info else '',
+                    "project_id": target_project_id,
+                    "status": current_task_info.get('status', 'active') if current_task_info else 'active',
+                }
+                if target_column_id:
+                    cache_params["column_id"] = target_column_id
+                
+                self.cache.save_task(**cache_params)
+                self.logger.info(f"Task successfully moved and verified: {command.task_id} -> {target_project_id}")
+                
+                if target_column_id:
+                    columns = await self.column_cache.get_columns(target_project_id)
+                    target_column = next((c for c in columns if c.get('id') == target_column_id), None)
+                    column_name = target_column.get('name', '') if target_column else ''
+                    return f"✓ Задача перемещена в список {project_name}, секция '{column_name}'"
                 else:
-                    # Move didn't work, use fallback
-                    self.logger.warning(f"update_task didn't move task, using fallback method")
-                    raise ValueError("Move via update_task failed")
-            except Exception as verify_error:
-                self.logger.warning(f"Could not verify move: {verify_error}, using fallback")
+                    return f"✓ Задача перемещена в список {project_name}"
+            else:
+                # Verification failed, use fallback
+                self.logger.warning(
+                    f"Task move verification failed for {command.task_id} -> {target_project_id}, "
+                    f"using fallback method (create+delete)"
+                )
                 raise ValueError("Move verification failed")
                     
-            except Exception as update_error:
-                # Fallback: create new task in target project and delete old one
-                self.logger.info(f"Using fallback move method: create+delete")
-                
+        except (ValueError, Exception) as move_error:
+            # Fallback: create new task in target project and delete old one
+            # This handles both verification failures and update_task errors
+            error_type = type(move_error).__name__
+            self.logger.info(
+                f"Using fallback move method (create+delete) due to {error_type}: {move_error}"
+            )
+            
+            # Fallback logic: create new task and delete old one
+            try:
                 # Get full task data
                 try:
                     full_task = await self.client.get(
@@ -909,11 +915,9 @@ class TaskManager:
                     return f"✓ Задача перемещена в список {project_name}, секция '{column_name}' (новая задача: {new_task_id})"
                 else:
                     return f"✓ Задача перемещена в список {project_name} (новая задача: {new_task_id})"
-            
-        except ValueError:
-            raise
-        except Exception as e:
-            self.logger.error(f"Error moving task: {e}", exc_info=True)
-            raise
+                    
+            except Exception as fallback_error:
+                self.logger.error(f"Error in fallback move method: {fallback_error}", exc_info=True)
+                raise
     
 
