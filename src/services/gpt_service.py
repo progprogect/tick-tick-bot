@@ -533,6 +533,32 @@ class GPTService:
                 lines.append(f"  ... и еще {len(tasks) - 5} задач")
             lines.append("")
         
+        # Format all_tasks (for GPT context - includes Inbox and all projects)
+        if fetched_data.get("all_tasks"):
+            all_tasks = fetched_data["all_tasks"]
+            lines.append(f"ВСЕ ЗАДАЧИ (включая Inbox и все проекты, найдено {len(all_tasks)} задач):")
+            
+            # Group by project for better readability
+            tasks_by_project = {}
+            for task in all_tasks:
+                project_id = task.get("projectId", "unknown")
+                if project_id not in tasks_by_project:
+                    tasks_by_project[project_id] = []
+                tasks_by_project[project_id].append(task)
+            
+            # Show tasks grouped by project
+            for project_id, tasks in list(tasks_by_project.items())[:10]:  # Show first 10 projects
+                project_name = "Inbox" if project_id.startswith("inbox") else f"Project {project_id[:8]}"
+                lines.append(f"  {project_name} ({len(tasks)} задач):")
+                for task in tasks[:3]:  # Show first 3 tasks per project
+                    lines.append(f"    - '{task.get('title', 'Без названия')}' (id: {task.get('id')}, projectId: {task.get('projectId')})")
+                if len(tasks) > 3:
+                    lines.append(f"    ... и еще {len(tasks) - 3} задач в этом проекте")
+            
+            if len(tasks_by_project) > 10:
+                lines.append(f"  ... и еще {len(tasks_by_project) - 10} проектов")
+            lines.append("")
+        
         return "\n".join(lines)
     
     def _prepare_example_data(

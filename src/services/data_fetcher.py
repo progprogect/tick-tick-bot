@@ -73,7 +73,15 @@ class DataFetcher:
         # Get incomplete tasks from API (GET /project/{projectId}/data returns only status=0)
         # ⚠️ ВАЖНО: API возвращает максимум 99 задач из каждого проекта (ограничение TickTick API)
         incomplete_tasks = await self.client.get_tasks()
-        self.logger.info(f"[DataFetcher] Retrieved {len(incomplete_tasks)} incomplete tasks from API")
+        self.logger.info(f"[DataFetcher] Retrieved {len(incomplete_tasks)} incomplete tasks from API (should include Inbox tasks)")
+        
+        # Log task details for debugging
+        if incomplete_tasks:
+            inbox_tasks_count = sum(1 for t in incomplete_tasks if t.get("projectId", "").startswith("inbox"))
+            self.logger.info(f"[DataFetcher] Inbox tasks in result: {inbox_tasks_count} out of {len(incomplete_tasks)} total")
+            if inbox_tasks_count > 0:
+                inbox_task_titles = [t.get("title", "") for t in incomplete_tasks if t.get("projectId", "").startswith("inbox")]
+                self.logger.info(f"[DataFetcher] Inbox task titles: {inbox_task_titles[:5]}")
         
         # Create a set of task IDs from API to check for duplicates
         api_task_ids = {task.get("id") for task in incomplete_tasks if task.get("id")}
