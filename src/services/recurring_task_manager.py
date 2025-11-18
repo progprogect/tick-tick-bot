@@ -134,7 +134,29 @@ class RecurringTaskManager:
             
             interval = command.recurrence.interval or 1
             recurrence_text = self._format_recurrence(command.recurrence.type, interval)
-            return f"✓ Создана повторяющаяся задача '{command.title}' ({recurrence_text})"
+            
+            # Format detailed response
+            message = f"✓ Создана повторяющаяся задача '{command.title}'\n\n"
+            message += f"🔄 Повторение: {recurrence_text}"
+            
+            if command.due_date:
+                try:
+                    from datetime import datetime
+                    dt = datetime.fromisoformat(command.due_date.replace('Z', '+00:00'))
+                    formatted_date = dt.strftime('%d.%m.%Y')
+                    message += f"\n📅 Срок выполнения: {formatted_date}"
+                except:
+                    message += f"\n📅 Срок выполнения: {command.due_date}"
+            
+            if command.tags:
+                tags_list = ', '.join(command.tags)
+                message += f"\n🏷️ Теги: {tags_list}"
+            
+            if command.notes:
+                notes_preview = command.notes[:50] + "..." if len(command.notes) > 50 else command.notes
+                message += f"\n📝 Заметка: {notes_preview}"
+            
+            return message
             
         except Exception as e:
             self.logger.error(f"Error creating recurring task: {e}", exc_info=True)

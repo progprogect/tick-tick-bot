@@ -162,3 +162,5 @@ async def test_create_project_cache_cleared(project_manager, mock_ticktick_clien
     assert project_manager.project_cache._projects == []
     assert project_manager.project_cache._last_update is None
 
+
+

@@ -50,7 +50,12 @@ class TagManager:
                 
                 if task:
                     command.task_id = task.get("id")
-                    self.logger.debug(f"Found task ID: {command.task_id}")
+                    # Save actual title and project_id from found task
+                    if task.get("title"):
+                        command.title = task.get("title")
+                    if task.get("projectId") and not command.project_id:
+                        command.project_id = task.get("projectId")
+                    self.logger.debug(f"Found task ID: {command.task_id}, title: {command.title}, project_id: {command.project_id}")
                 else:
                     raise ValueError(
                         f"Задача '{command.title}' не найдена. "
@@ -63,7 +68,38 @@ class TagManager:
             # Get current task data to merge tags
             original_task_data = self.cache.get_task_data(command.task_id)
             if not original_task_data:
-                raise ValueError(f"Задача {command.task_id} не найдена в кэше")
+                # Try to get from API if not in cache
+                # Get project_id if not set
+                project_id_for_api = command.project_id
+                if not project_id_for_api:
+                    # Try to get from cache
+                    cached_task = self.cache.get_task_data(command.task_id)
+                    if cached_task and cached_task.get('project_id'):
+                        project_id_for_api = cached_task.get('project_id')
+                
+                if project_id_for_api:
+                    try:
+                        task_from_api = await self.client.get(
+                            endpoint=f"/open/v1/project/{project_id_for_api}/task/{command.task_id}",
+                            headers=self.client._get_headers(),
+                        )
+                        if isinstance(task_from_api, dict):
+                            # Update cache with task data
+                            self.cache.save_task(
+                                task_id=command.task_id,
+                                title=task_from_api.get('title', command.title or 'задача'),
+                                project_id=project_id_for_api,
+                            )
+                            original_task_data = {
+                                'title': task_from_api.get('title', command.title or 'задача'),
+                                'tags': task_from_api.get('tags', []),
+                                'notes': task_from_api.get('content', ''),
+                            }
+                    except Exception as e:
+                        self.logger.warning(f"Could not get task from API: {e}")
+                        raise ValueError(f"Задача {command.task_id} не найдена в кэше и не может быть получена из API")
+                else:
+                    raise ValueError(f"Задача {command.task_id} не найдена в кэше и project_id не указан для получения из API")
             
             # Merge existing tags with new tags
             existing_tags = original_task_data.get('tags', [])
@@ -77,11 +113,37 @@ class TagManager:
                 tags=merged_tags,
             )
             
+            # Get task title for response (prioritize: found task > cache > command.title)
+            task_title = command.title
+            if not task_title:
+                task_title = original_task_data.get('title', 'задача')
+            if not task_title or task_title == 'задача':
+                # Try to get from cache one more time
+                task_data = self.cache.get_task_data(command.task_id)
+                if task_data and task_data.get('title'):
+                    task_title = task_data.get('title')
+            
             # Update cache with new tags
             self.cache.update_task_field(command.task_id, 'tags', merged_tags)
             
             self.logger.info(f"Tags added to task {command.task_id}: {command.tags}")
-            return f"✓ Теги добавлены к задаче: {', '.join(command.tags)}"
+            
+            # Format detailed response
+            new_tags_list = ', '.join(command.tags)
+            had_existing_tags = bool(existing_tags)
+            
+            if had_existing_tags:
+                all_tags_list = ', '.join(merged_tags)
+                return (
+                    f"✓ Теги добавлены к задаче '{task_title}'\n\n"
+                    f"🏷️ Новые теги: {new_tags_list}\n"
+                    f"📋 Все теги задачи: {all_tags_list}"
+                )
+            else:
+                return (
+                    f"✓ Теги добавлены к задаче '{task_title}'\n\n"
+                    f"🏷️ Добавленные теги: {new_tags_list}"
+                )
             
         except ValueError:
             # Re-raise ValueError as-is (it's already user-friendly)

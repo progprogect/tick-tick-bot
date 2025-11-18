@@ -88,7 +88,7 @@ class ReminderManager:
             )
             
             # Update cache with reminders
-            cache.update_task_field(command.task_id, "reminders", reminders)
+            self.cache.update_task_field(command.task_id, "reminders", reminders)
             
             self.logger.info(f"Reminder set for task {command.task_id} at {command.reminder} (trigger: {trigger})")
             
@@ -100,7 +100,20 @@ class ReminderManager:
             except:
                 reminder_text = command.reminder
             
-            return f"✓ Напоминание установлено для задачи '{title}' на {reminder_text}"
+            # Check if there were existing reminders
+            had_existing_reminders = len(existing_reminders) > 0
+            
+            if had_existing_reminders:
+                return (
+                    f"✓ Напоминание добавлено к задаче '{title}'\n\n"
+                    f"⏰ Новое напоминание: {reminder_text}\n"
+                    f"ℹ️ Напоминание добавлено к существующим напоминаниям задачи"
+                )
+            else:
+                return (
+                    f"✓ Напоминание установлено для задачи '{title}'\n\n"
+                    f"⏰ Время напоминания: {reminder_text}"
+                )
             
         except Exception as e:
             self.logger.error(f"Error setting reminder: {e}", exc_info=True)

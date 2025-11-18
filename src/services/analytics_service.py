@@ -8,7 +8,6 @@ from src.api.ticktick_client import TickTickClient
 from src.services.gpt_service import GPTService
 from src.utils.logger import logger
 from src.utils.formatters import format_analytics
-from src.utils.date_utils import get_current_datetime
 
 
 class AnalyticsService:
@@ -41,7 +40,7 @@ class AnalyticsService:
         """
         try:
             # Calculate date range
-            end_date = get_current_datetime()
+            end_date = datetime.now()
             
             if period == "week":
                 start_date = end_date - timedelta(weeks=1)
@@ -137,8 +136,8 @@ class AnalyticsService:
         try:
             # Calculate date range if period is specified
             if period and not start_date:
-                from datetime import timedelta
-                now = get_current_datetime()
+                from datetime import datetime, timedelta
+                now = datetime.now()
                 
                 if period == "today":
                     start_date = now.strftime("%Y-%m-%dT00:00:00+00:00")

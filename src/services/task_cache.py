@@ -8,7 +8,6 @@ from typing import Optional, Dict, List, Any
 from pathlib import Path
 from datetime import datetime
 from src.utils.logger import logger
-from src.utils.date_utils import get_current_datetime
 
 
 class TaskCacheService:
@@ -139,15 +138,12 @@ class TaskCacheService:
         task_id: str, 
         title: str, 
         project_id: Optional[str] = None,
-        column_id: Optional[str] = None,
         original_task_id: Optional[str] = None,
         status: str = "active",
         tags: Optional[List[str]] = None,
         notes: Optional[str] = None,
         reminders: Optional[List[str]] = None,
         repeat_flag: Optional[str] = None,
-        sort_order: Optional[int] = None,
-        kind: Optional[str] = None,
     ):
         """
         Save task to cache
@@ -156,14 +152,12 @@ class TaskCacheService:
             task_id: Task ID
             title: Task title
             project_id: Project ID (optional)
-            column_id: Column ID (optional, for Kanban projects)
             original_task_id: Original task ID if this is a replacement (optional)
             status: Task status (active, completed, deleted)
             tags: Tags list (optional)
             notes: Notes content (optional)
             reminders: Reminders list (optional)
             repeat_flag: Repeat flag in RRULE format (optional)
-            kind: Task kind ("TEXT", "NOTE", "CHECKLIST") (optional)
         """
         from datetime import datetime
         self._load_cache()
@@ -173,18 +167,15 @@ class TaskCacheService:
         
         self._cache[task_id] = {
             'title': title,
-            'project_id': project_id if project_id is not None else existing_data.get('project_id'),
-            'column_id': column_id if column_id is not None else existing_data.get('column_id'),
+            'project_id': project_id or existing_data.get('project_id'),
             'status': status,
             'original_task_id': original_task_id or existing_data.get('original_task_id'),
             'tags': tags if tags is not None else existing_data.get('tags', []),
             'notes': notes if notes is not None else existing_data.get('notes', ''),
             'reminders': reminders if reminders is not None else existing_data.get('reminders', []),
             'repeat_flag': repeat_flag if repeat_flag is not None else existing_data.get('repeat_flag'),
-            'sort_order': sort_order if sort_order is not None else existing_data.get('sort_order'),
-            'kind': kind if kind is not None else existing_data.get('kind', 'TEXT'),
-            'created_at': existing_data.get('created_at', get_current_datetime().isoformat()),
-            'updated_at': get_current_datetime().isoformat(),
+            'created_at': existing_data.get('created_at', datetime.now().isoformat()),
+            'updated_at': datetime.now().isoformat(),
         }
         self._save_cache()
         self.logger.debug(f"Cached task: {title} -> {task_id} (status: {status})")
@@ -201,7 +192,7 @@ class TaskCacheService:
         self._load_cache()
         if task_id in self._cache:
             self._cache[task_id][field] = value
-            self._cache[task_id]['updated_at'] = get_current_datetime().isoformat()
+            self._cache[task_id]['updated_at'] = datetime.now().isoformat()
             self._save_cache()
             self.logger.debug(f"Updated field {field} for task {task_id}")
         else:
@@ -224,23 +215,23 @@ class TaskCacheService:
             if 'status' not in task_data:
                 task_data['status'] = 'active'
             if 'created_at' not in task_data:
-                task_data['created_at'] = get_current_datetime().isoformat()
+                task_data['created_at'] = datetime.now().isoformat()
             if 'updated_at' not in task_data:
-                task_data['updated_at'] = get_current_datetime().isoformat()
+                task_data['updated_at'] = datetime.now().isoformat()
         return task_data
     
     def mark_as_completed(self, task_id: str):
         """Mark task as completed in cache"""
         if task_id in self._cache:
             self._cache[task_id]['status'] = 'completed'
-            self._cache[task_id]['updated_at'] = get_current_datetime().isoformat()
+            self._cache[task_id]['updated_at'] = datetime.now().isoformat()
             self._save_cache()
     
     def mark_as_deleted(self, task_id: str):
         """Mark task as deleted in cache"""
         if task_id in self._cache:
             self._cache[task_id]['status'] = 'deleted'
-            self._cache[task_id]['updated_at'] = get_current_datetime().isoformat()
+            self._cache[task_id]['updated_at'] = datetime.now().isoformat()
             self._save_cache()
     
     def delete_task(self, task_id: str):
@@ -273,118 +264,4 @@ class TaskCacheService:
                 if project_id is None or task_project_id == project_id:
                     completed_tasks.append((task_id, task_project_id))
         return completed_tasks
-    
-    async def sync_task_from_api(
-        self,
-        task_id: str,
-        project_id: str,
-        client: Any,  # TickTickClient
-    ) -> None:
-        """
-        Synchronize task from API to cache
-        
-        Gets current task data from API and saves to cache
-        
-        Args:
-            task_id: Task ID
-            project_id: Project ID
-            client: TickTickClient instance
-        """
-        try:
-            from src.config.constants import TICKTICK_API_VERSION
-            
-            # Ensure client is authenticated
-            if not hasattr(client, 'access_token') or not client.access_token:
-                await client.authenticate()
-            
-            # Get task from API
-            task = await client.get(
-                endpoint=f"/open/{TICKTICK_API_VERSION}/project/{project_id}/task/{task_id}",
-                headers=client._get_headers(),
-            )
-            
-            if isinstance(task, dict):
-                # Convert API status to cache status
-                api_status = task.get("status", 0)
-                cache_status = "completed" if api_status == 2 else "active"
-                
-                # Save to cache
-                self.save_task(
-                    task_id=task.get("id", task_id),
-                    title=task.get("title", ""),
-                    project_id=task.get("projectId", project_id),
-                    status=cache_status,
-                    tags=task.get("tags", []),
-                    notes=task.get("content", ""),
-                    reminders=task.get("reminders", []),
-                    repeat_flag=task.get("repeatFlag"),
-                    sort_order=task.get("sortOrder"),
-                )
-                self.logger.info(f"[TaskCache] Synced task {task_id} from API to cache")
-            else:
-                self.logger.warning(f"[TaskCache] Failed to sync task {task_id}: invalid response from API")
-        except Exception as e:
-            self.logger.warning(f"[TaskCache] Failed to sync task {task_id} from API: {e}", exc_info=True)
-    
-    async def bulk_sync_tasks_from_project(
-        self,
-        project_id: str,
-        client: Any,  # TickTickClient
-    ) -> int:
-        """
-        Synchronize all tasks from project to cache
-        
-        Gets all tasks from project using GET /open/v1/project/{projectId}/data
-        and saves them to cache
-        
-        Args:
-            project_id: Project ID
-            client: TickTickClient instance
-            
-        Returns:
-            Number of tasks synchronized
-        """
-        try:
-            from src.config.constants import TICKTICK_API_VERSION
-            
-            # Ensure client is authenticated
-            if not hasattr(client, 'access_token') or not client.access_token:
-                await client.authenticate()
-            
-            # Get project data (includes tasks)
-            response = await client.get(
-                endpoint=f"/open/{TICKTICK_API_VERSION}/project/{project_id}/data",
-                headers=client._get_headers(),
-            )
-            
-            if isinstance(response, dict) and "tasks" in response:
-                tasks = response["tasks"]
-                if isinstance(tasks, list):
-                    count = 0
-                    for task in tasks:
-                        # GET /project/{projectId}/data returns only incomplete tasks (status=0)
-                        self.save_task(
-                            task_id=task.get("id"),
-                            title=task.get("title", ""),
-                            project_id=task.get("projectId", project_id),
-                            status="active",  # Only incomplete tasks are returned
-                            tags=task.get("tags", []),
-                            notes=task.get("content", ""),
-                            reminders=task.get("reminders", []),
-                            repeat_flag=task.get("repeatFlag"),
-                            sort_order=task.get("sortOrder"),
-                        )
-                        count += 1
-                    
-                    self.logger.info(f"[TaskCache] Synced {count} tasks from project {project_id} to cache")
-                    return count
-                else:
-                    self.logger.warning(f"[TaskCache] Invalid tasks format in response for project {project_id}")
-                    return 0
-            else:
-                self.logger.warning(f"[TaskCache] No tasks in response for project {project_id}")
-                return 0
-        except Exception as e:
-            self.logger.warning(f"[TaskCache] Failed to sync tasks from project {project_id}: {e}", exc_info=True)
-            return 0
 

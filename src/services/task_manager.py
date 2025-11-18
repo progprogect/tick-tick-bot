@@ -593,7 +593,10 @@ class TaskManager:
             # Check if task is already completed
             task_data = self.cache.get_task_data(command.task_id)
             if task_data and task_data.get('status') == 'completed':
-                return f"Задача '{title}' уже выполнена"
+                return (
+                    f"ℹ️ Задача '{title}' уже выполнена\n\n"
+                    f"✅ Задача была отмечена как выполненная ранее"
+                )
             
             # Get project_id for complete (required by API)
             project_id = command.project_id
@@ -726,7 +729,18 @@ class TaskManager:
             status=current_task_info.get('status', 'active') if current_task_info else 'active',
         )
         
-        return f"✓ Задача перемещена в секцию '{column_name}'"
+        # Get task title for response
+        task_title = command.title
+        if not task_title:
+            task_info = self.cache.get_task_data(command.task_id)
+            if task_info:
+                task_title = task_info.get('title', 'задача')
+        
+        return (
+            f"✓ Задача '{task_title}' перемещена в секцию '{column_name}'\n\n"
+            f"📁 Проект: {project_id[:8]}...\n"
+            f"📋 Секция: {column_name}"
+        )
     
     async def _move_task_to_project(self, command: ParsedCommand, current_project_id: str) -> str:
         """
@@ -820,13 +834,27 @@ class TaskManager:
                 self.cache.save_task(**cache_params)
                 self.logger.info(f"Task successfully moved and verified: {command.task_id} -> {target_project_id}")
                 
+                # Get task title for response
+                task_title = command.title
+                if not task_title:
+                    task_info = self.cache.get_task_data(command.task_id)
+                    if task_info:
+                        task_title = task_info.get('title', 'задача')
+                
                 if target_column_id:
                     columns = await self.column_cache.get_columns(target_project_id)
                     target_column = next((c for c in columns if c.get('id') == target_column_id), None)
                     column_name = target_column.get('name', '') if target_column else ''
-                    return f"✓ Задача перемещена в список {project_name}, секция '{column_name}'"
+                    return (
+                        f"✓ Задача '{task_title}' перемещена\n\n"
+                        f"📁 Новый список: {project_name}\n"
+                        f"📋 Секция: {column_name}"
+                    )
                 else:
-                    return f"✓ Задача перемещена в список {project_name}"
+                    return (
+                        f"✓ Задача '{task_title}' перемещена\n\n"
+                        f"📁 Новый список: {project_name}"
+                    )
             else:
                 # Verification failed, use fallback
                 self.logger.warning(
@@ -908,13 +936,25 @@ class TaskManager:
                 project_name = target_project.get('name', target_project_id) if target_project else target_project_id
                 self.logger.info(f"Task moved via create+delete: {command.task_id} -> {new_task_id} (in {target_project_id})")
                 
+                # Get task title for response
+                task_title = new_task_data.get('title', 'задача')
+                
                 if target_column_id:
                     columns = await self.column_cache.get_columns(target_project_id)
                     target_column = next((c for c in columns if c.get('id') == target_column_id), None)
                     column_name = target_column.get('name', '') if target_column else ''
-                    return f"✓ Задача перемещена в список {project_name}, секция '{column_name}' (новая задача: {new_task_id})"
+                    return (
+                        f"✓ Задача '{task_title}' перемещена (использован метод создания новой задачи)\n\n"
+                        f"📁 Новый список: {project_name}\n"
+                        f"📋 Секция: {column_name}\n"
+                        f"🆔 ID новой задачи: {new_task_id}"
+                    )
                 else:
-                    return f"✓ Задача перемещена в список {project_name} (новая задача: {new_task_id})"
+                    return (
+                        f"✓ Задача '{task_title}' перемещена (использован метод создания новой задачи)\n\n"
+                        f"📁 Новый список: {project_name}\n"
+                        f"🆔 ID новой задачи: {new_task_id}"
+                    )
                     
             except Exception as fallback_error:
                 self.logger.error(f"Error in fallback move method: {fallback_error}", exc_info=True)
