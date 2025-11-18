@@ -195,6 +195,14 @@ class GPTService:
             
             self.logger.debug(f"Retrieved {len(context['projects'])} projects for context")
             
+            # Check if Inbox is in the context
+            inbox_found = any(p.get("name", "").lower() == "inbox" or p.get("id", "").startswith("inbox") 
+                             for p in context["projects"])
+            if inbox_found:
+                self.logger.info("✅ Inbox project found in context for GPT")
+            else:
+                self.logger.warning("⚠️ Inbox project NOT found in context for GPT")
+            
             # Log project names for debugging (first 10)
             if context["projects"]:
                 project_names = [p["name"] for p in context["projects"][:10]]

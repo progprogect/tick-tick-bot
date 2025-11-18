@@ -57,6 +57,7 @@ class TickTickClient(BaseAPIClient):
         self.client_id = settings.TICKTICK_CLIENT_ID
         self.client_secret = settings.TICKTICK_CLIENT_SECRET
         self.logger = logger
+        self._inbox_project_id: Optional[str] = None  # Cache for Inbox project ID
     
     async def authenticate(self) -> bool:
         """
@@ -534,13 +535,39 @@ class TickTickClient(BaseAPIClient):
                     return []
             else:
                 # Get tasks from all projects
-                # First, get list of projects
+                # First, get list of projects (this will include Inbox)
                 try:
                     projects = await self.get_projects()
                     
+                    # Explicitly get Inbox tasks first using /project/inbox/data endpoint
+                    try:
+                        inbox_response = await self.get(
+                            endpoint=f"/open/{TICKTICK_API_VERSION}/project/inbox/data",
+                            headers=self._get_headers(),
+                        )
+                        
+                        if isinstance(inbox_response, dict) and "tasks" in inbox_response:
+                            inbox_tasks = inbox_response["tasks"]
+                            if isinstance(inbox_tasks, list):
+                                all_tasks.extend(inbox_tasks)
+                                self.logger.info(f"Retrieved {len(inbox_tasks)} tasks from Inbox via /project/inbox/data")
+                                
+                                # Cache Inbox project ID from first task if not cached yet
+                                if not self._inbox_project_id and len(inbox_tasks) > 0:
+                                    inbox_id = inbox_tasks[0].get("projectId")
+                                    if inbox_id:
+                                        self._inbox_project_id = inbox_id
+                    except Exception as e:
+                        self.logger.warning(f"Failed to get tasks from Inbox via /project/inbox/data: {e}")
+                    
+                    # Get tasks from all other projects
                     for project in projects:
                         project_id_val = project.get("id")
                         if not project_id_val:
+                            continue
+                        
+                        # Skip Inbox if we already processed it
+                        if inbox_id and project_id_val == inbox_id:
                             continue
                         
                         try:
@@ -809,12 +836,88 @@ class TickTickClient(BaseAPIClient):
             # Default to "at time"
             return "TRIGGER:PT0S"
     
-    async def get_projects(self) -> List[Dict[str, Any]]:
+    async def _get_inbox_project_id(self) -> Optional[str]:
         """
-        Get list of projects/lists
+        Get Inbox project ID from /project/inbox/data endpoint.
+        Inbox is not returned in GET /open/v1/project, but we can get its ID from tasks.
+        If Inbox is empty, we create a temporary task to determine the ID.
         
         Returns:
-            List of projects
+            Inbox project ID or None if not found
+        """
+        # Return cached value if available
+        if self._inbox_project_id:
+            return self._inbox_project_id
+        
+        if not self.access_token:
+            await self.authenticate()
+        
+        try:
+            # Get Inbox tasks - the response contains projectId in each task
+            response = await self.get(
+                endpoint=f"/open/{TICKTICK_API_VERSION}/project/inbox/data",
+                headers=self._get_headers(),
+            )
+            
+            if isinstance(response, dict) and "tasks" in response:
+                tasks = response["tasks"]
+                if isinstance(tasks, list) and len(tasks) > 0:
+                    # Get projectId from first task
+                    inbox_id = tasks[0].get("projectId")
+                    if inbox_id:
+                        # Cache the Inbox ID
+                        self._inbox_project_id = inbox_id
+                        self.logger.info(f"Detected Inbox project ID from /project/inbox/data: {inbox_id}")
+                        return inbox_id
+            
+            # If Inbox is empty, fallback to creating a temporary task
+            # This is a rare case, but we need to handle it
+            self.logger.info("Inbox is empty, using fallback method to detect Inbox ID")
+            import time
+            temp_task_data = {
+                "title": f"__TEMP_INBOX_DETECT_{int(time.time())}__",
+                "status": 0,
+            }
+            
+            created_task = await self.post(
+                endpoint=f"/open/{TICKTICK_API_VERSION}/task",
+                headers=self._get_headers(),
+                json_data=temp_task_data,
+            )
+            
+            if isinstance(created_task, dict) and created_task.get("projectId"):
+                inbox_id = created_task.get("projectId")
+                task_id = created_task.get("id")
+                
+                # Delete the temporary task
+                try:
+                    await self.delete(
+                        endpoint=f"/open/{TICKTICK_API_VERSION}/project/{inbox_id}/task/{task_id}",
+                        headers=self._get_headers(),
+                    )
+                except Exception as e:
+                    self.logger.warning(f"Failed to delete temporary task for Inbox detection: {e}")
+                
+                # Cache the Inbox ID
+                self._inbox_project_id = inbox_id
+                self.logger.info(f"Detected Inbox project ID via fallback method: {inbox_id}")
+                return inbox_id
+            
+            self.logger.warning("Inbox project ID not found")
+            return None
+            
+        except Exception as e:
+            self.logger.warning(f"Failed to get Inbox project ID from /project/inbox/data: {e}")
+            return None
+    
+    async def get_projects(self) -> List[Dict[str, Any]]:
+        """
+        Get list of projects/lists (including Inbox)
+        
+        Note: Inbox is not returned by GET /open/v1/project, so we add it explicitly.
+        
+        Returns:
+            List of projects (including Inbox)
         """
         if not self.access_token:
             await self.authenticate()
@@ -824,10 +927,28 @@ class TickTickClient(BaseAPIClient):
             headers=self._get_headers(),
         )
         
+        projects = []
         if isinstance(response, list):
-            return response
+            projects = response
         elif "projects" in response:
-            return response["projects"]
-        else:
-            return []
+            projects = response["projects"]
+        
+        # Add Inbox project explicitly (it's not returned in the list)
+        # Get Inbox ID from /project/inbox/data if not cached
+        inbox_id = await self._get_inbox_project_id()
+        if inbox_id:
+            # Check if Inbox is already in the list
+            inbox_exists = any(p.get("id") == inbox_id for p in projects)
+            if not inbox_exists:
+                inbox_project = {
+                    "id": inbox_id,
+                    "name": "Inbox",
+                    "sortOrder": -9223372036854775808,  # Very low sort order to put it first
+                    "viewMode": "list",
+                    "kind": "TASK",
+                }
+                projects.insert(0, inbox_project)  # Add Inbox at the beginning
+                self.logger.info(f"Added Inbox project to list: {inbox_id}")
+        
+        return projects
 
