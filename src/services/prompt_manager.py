@@ -710,6 +710,55 @@ class PromptManager:
 - Если команда содержит "последняя созданная", "последняя задача" - используй queryType="last_created", limit=1, sortBy="createdTime"
 - Если команда содержит "последние N задач" - используй limit=N, sortBy="createdTime"
 - Если команда содержит "первая созданная" - используй queryType="first_created", limit=1, sortBy="createdTime" (сортировка по возрастанию)""",
+            
+            "create_project": """ПРИМЕР для create_project:
+Команда: "Создай проект Дом"
+Данные: {}
+Ответ:
+{
+  "action": "create_project",
+  "projectName": "Дом"
+}
+
+ПРИМЕР для create_project с параметрами:
+Команда: "Создай проект Работа с цветом #FF0000"
+Данные: {}
+Ответ:
+{
+  "action": "create_project",
+  "projectName": "Работа",
+  "projectColor": "#FF0000"
+}
+
+ВАЖНО для create_project:
+- ОБЯЗАТЕЛЬНО извлекай название проекта из команды (например, "Создай проект X" → projectName: "X")
+- Название проекта указывай в поле "projectName" (НЕ "project_name")
+- Если указан цвет, используй формат "#RRGGBB" (например, "#FF0000" для красного)
+- Если указан режим отображения (список, канбан), используй "projectViewMode": "list" или "kanban"
+- Если указан тип проекта, используй "projectKind": "TASK" или "NOTE" """,
+            
+            "delete_project": """ПРИМЕР для delete_project:
+Команда: "Удали проект Дом"
+Данные: {"projects": {"Дом": {"id": "project_123", "name": "Дом"}}}
+Ответ:
+{
+  "action": "delete_project",
+  "projectId": "project_123"
+}
+
+ПРИМЕР для delete_project (только название):
+Команда: "Удали проект Работа"
+Данные: {"projects": {"Работа": {"id": "project_456", "name": "Работа"}}}
+Ответ:
+{
+  "action": "delete_project",
+  "projectName": "Работа"
+}
+
+ВАЖНО для delete_project:
+- Если проект найден в данных, используй его "projectId"
+- Если проект не найден, но указано название, используй "projectName" (система найдет проект по названию)
+- Можно указать либо projectId, либо projectName""",
         }
         
         # Get example for this action type, or use generic
