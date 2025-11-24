@@ -602,18 +602,24 @@ class DataFetcher:
                 if end_date and status_filter == 0:
                     try:
                         from datetime import datetime
-                        from src.utils.date_utils import get_current_date_str
+                        from src.utils.date_utils import get_current_date_str, get_current_datetime
+                        
+                        # Parse filter date (assume it's a date string like "2024-11-04")
                         filter_date = datetime.fromisoformat(end_date).date()
-                        current_date = datetime.fromisoformat(get_current_date_str()).date()
+                        
+                        # Get current date in MSK timezone
+                        current_dt = get_current_datetime()
+                        current_date = current_dt.date()
                         
                         # If end_date is in the past, this is likely an overdue tasks request
                         if filter_date < current_date:
                             self.logger.warning(
                                 f"Detected incorrect filter for overdue tasks: status={status_filter}, end_date={end_date}. "
-                                f"Treating as overdue tasks request (status: -1)"
+                                f"Current date (MSK): {current_date}. Treating as overdue tasks request (status: -1)"
                             )
                             status_filter = -1
-                    except Exception:
+                    except Exception as e:
+                        self.logger.debug(f"Could not parse end_date for overdue detection: {e}")
                         pass
             
             # Handle overdue tasks filter (status: -1)
