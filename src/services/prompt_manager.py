@@ -335,6 +335,8 @@ class PromptManager:
 5. Если команда - это update_task/delete_task/complete_task/add_tags/add_note с названием задачи, ОБЯЗАТЕЛЬНО добавь название в task_by_title
 6. Если команда - это move_task, добавь название задачи в task_by_title и целевой проект в project_by_name
 7. Если команда - это bulk_move или bulk_add_tags, может потребоваться tasks_by_filters
+   - Для просроченных задач ОБЯЗАТЕЛЬНО используй status: -1 (БЕЗ end_date или start_date)
+   - Для задач на конкретную дату используй start_date и end_date с той же датой
 8. Если команда содержит "отметь задачу X выполненной", "заверши задачу Y", "выполни задачу Z" - используй action_type: "complete_task"
 
 ПРИМЕРЫ:
@@ -467,9 +469,10 @@ class PromptManager:
 
 ВАЖНО для bulk_move с просроченными задачами:
 - Если команда содержит "просроченные задачи", "просроченные", "просрочено" - ОБЯЗАТЕЛЬНО используй status: -1
-- НЕ используй end_date для просроченных задач - система сама определит задачи с dueDate < текущая дата
+- НЕ используй end_date или start_date для просроченных задач - система сама определит задачи с dueDate < текущая дата
 - status: -1 означает "просроченные задачи" (задачи с dueDate раньше текущей даты)
 - Текущая дата уже известна системе, не нужно указывать её в фильтрах
+- КРИТИЧЕСКИ ВАЖНО: Для просроченных задач используй ТОЛЬКО {"status": -1}, БЕЗ других полей в tasks_by_filters
 """
     
     def get_stage1_prompt(self) -> str:
@@ -477,16 +480,18 @@ class PromptManager:
         Get prompt for stage 1 (determine data requirements)
         
         Returns:
-            Stage 1 prompt string with current date
+            Stage 1 prompt string with current date in MSK timezone
         """
-        from datetime import datetime
-        current_date = datetime.now().strftime("%Y-%m-%d")
-        current_datetime = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        from src.utils.date_utils import get_current_datetime, get_current_date_str, get_current_datetime_str
         
-        # Replace placeholder with actual current date
+        # Get current date/time in MSK timezone (UTC+3)
+        current_date = get_current_date_str()  # Format: YYYY-MM-DD
+        current_datetime = get_current_datetime_str()  # Format: YYYY-MM-DD HH:MM:SS
+        
+        # Replace placeholder with actual current date in MSK
         prompt = self.PROMPT_STAGE_1_DETERMINE_DATA.replace(
             "ВАЖНО: Для определения дат используй текущую дату.",
-            f"ВАЖНО: Текущая дата - {current_date} ({current_datetime}). Используй эту дату для определения относительных дат и просроченных задач."
+            f"ВАЖНО: Текущая дата (МСК, UTC+3) - {current_date} ({current_datetime}). Используй эту дату для определения относительных дат и просроченных задач. Просроченные задачи - это задачи с dueDate раньше {current_date}."
         )
         
         return prompt
