@@ -454,6 +454,22 @@ class PromptManager:
   }
 }
 В этом случае нужно будет указать в JSON Stage 3: limit=5, sortBy="createdTime"
+
+13. "Перенеси просроченные задачи на завтра":
+{
+  "action_type": "bulk_move",
+  "required_data": {
+    "tasks_by_filters": {
+      "status": -1
+    }
+  }
+}
+
+ВАЖНО для bulk_move с просроченными задачами:
+- Если команда содержит "просроченные задачи", "просроченные", "просрочено" - ОБЯЗАТЕЛЬНО используй status: -1
+- НЕ используй end_date для просроченных задач - система сама определит задачи с dueDate < текущая дата
+- status: -1 означает "просроченные задачи" (задачи с dueDate раньше текущей даты)
+- Текущая дата уже известна системе, не нужно указывать её в фильтрах
 """
     
     def get_stage1_prompt(self) -> str:
@@ -461,9 +477,19 @@ class PromptManager:
         Get prompt for stage 1 (determine data requirements)
         
         Returns:
-            Stage 1 prompt string
+            Stage 1 prompt string with current date
         """
-        return self.PROMPT_STAGE_1_DETERMINE_DATA
+        from datetime import datetime
+        current_date = datetime.now().strftime("%Y-%m-%d")
+        current_datetime = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        
+        # Replace placeholder with actual current date
+        prompt = self.PROMPT_STAGE_1_DETERMINE_DATA.replace(
+            "ВАЖНО: Для определения дат используй текущую дату.",
+            f"ВАЖНО: Текущая дата - {current_date} ({current_datetime}). Используй эту дату для определения относительных дат и просроченных задач."
+        )
+        
+        return prompt
     
     def get_stage3_prompt(self, action_type: str, example_data: Dict[str, Any]) -> str:
         """
