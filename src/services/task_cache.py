@@ -144,6 +144,7 @@ class TaskCacheService:
         notes: Optional[str] = None,
         reminders: Optional[List[str]] = None,
         repeat_flag: Optional[str] = None,
+        kind: Optional[str] = None,
     ):
         """
         Save task to cache
@@ -158,6 +159,7 @@ class TaskCacheService:
             notes: Notes content (optional)
             reminders: Reminders list (optional)
             repeat_flag: Repeat flag in RRULE format (optional)
+            kind: Task kind ("TEXT", "NOTE", "CHECKLIST") (optional)
         """
         from datetime import datetime
         self._load_cache()
@@ -174,6 +176,7 @@ class TaskCacheService:
             'notes': notes if notes is not None else existing_data.get('notes', ''),
             'reminders': reminders if reminders is not None else existing_data.get('reminders', []),
             'repeat_flag': repeat_flag if repeat_flag is not None else existing_data.get('repeat_flag'),
+            'kind': kind if kind is not None else existing_data.get('kind'),
             'created_at': existing_data.get('created_at', datetime.now().isoformat()),
             'updated_at': datetime.now().isoformat(),
         }
