@@ -145,6 +145,7 @@ class TaskCacheService:
         reminders: Optional[List[str]] = None,
         repeat_flag: Optional[str] = None,
         kind: Optional[str] = None,
+        column_id: Optional[str] = None,
     ):
         """
         Save task to cache
@@ -160,6 +161,7 @@ class TaskCacheService:
             reminders: Reminders list (optional)
             repeat_flag: Repeat flag in RRULE format (optional)
             kind: Task kind ("TEXT", "NOTE", "CHECKLIST") (optional)
+            column_id: Column ID for Kanban projects (optional)
         """
         from datetime import datetime
         self._load_cache()
@@ -177,6 +179,7 @@ class TaskCacheService:
             'reminders': reminders if reminders is not None else existing_data.get('reminders', []),
             'repeat_flag': repeat_flag if repeat_flag is not None else existing_data.get('repeat_flag'),
             'kind': kind if kind is not None else existing_data.get('kind'),
+            'column_id': column_id if column_id is not None else existing_data.get('column_id'),
             'created_at': existing_data.get('created_at', datetime.now().isoformat()),
             'updated_at': datetime.now().isoformat(),
         }

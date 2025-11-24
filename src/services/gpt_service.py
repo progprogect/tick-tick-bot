@@ -527,10 +527,8 @@ class GPTService:
         if fetched_data.get("tasks_by_filters"):
             tasks = fetched_data["tasks_by_filters"]
             lines.append(f"ЗАДАЧИ ПО ФИЛЬТРАМ (найдено {len(tasks)} задач):")
-            for task in tasks[:5]:  # Show first 5 as examples
+            for task in tasks:  # Show ALL tasks (no limit)
                 lines.append(f"  - '{task.get('title', 'Без названия')}' (id: {task.get('id')}, dueDate: {task.get('dueDate', 'Не указана')})")
-            if len(tasks) > 5:
-                lines.append(f"  ... и еще {len(tasks) - 5} задач")
             lines.append("")
         
         # Format all_tasks (for GPT context - includes Inbox and all projects)
@@ -546,17 +544,12 @@ class GPTService:
                     tasks_by_project[project_id] = []
                 tasks_by_project[project_id].append(task)
             
-            # Show tasks grouped by project
-            for project_id, tasks in list(tasks_by_project.items())[:10]:  # Show first 10 projects
+            # Show tasks grouped by project (NO LIMITS - show ALL tasks)
+            for project_id, tasks in tasks_by_project.items():
                 project_name = "Inbox" if project_id.startswith("inbox") else f"Project {project_id[:8]}"
                 lines.append(f"  {project_name} ({len(tasks)} задач):")
-                for task in tasks[:3]:  # Show first 3 tasks per project
+                for task in tasks:  # Show ALL tasks per project (no limit)
                     lines.append(f"    - '{task.get('title', 'Без названия')}' (id: {task.get('id')}, projectId: {task.get('projectId')})")
-                if len(tasks) > 3:
-                    lines.append(f"    ... и еще {len(tasks) - 3} задач в этом проекте")
-            
-            if len(tasks_by_project) > 10:
-                lines.append(f"  ... и еще {len(tasks_by_project) - 10} проектов")
             lines.append("")
         
         return "\n".join(lines)

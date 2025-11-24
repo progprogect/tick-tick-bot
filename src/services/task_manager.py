@@ -800,164 +800,184 @@ class TaskManager:
             if not target_column_id:
                 self.logger.warning(f"Column '{command.target_column_id}' not found in target project, moving without column")
         
-        # Try to move via update_task first (direct API call)
+        # Check if task is already in target project
+        if current_project_id == target_project_id:
+            self.logger.info(f"Task {command.task_id} is already in target project {target_project_id}, no move needed")
+            project_name = target_project.get('name', target_project_id) if target_project else target_project_id
+            task_title = command.title
+            if not task_title:
+                task_info = self.cache.get_task_data(command.task_id)
+                if task_info:
+                    task_title = task_info.get('title', 'задача')
+            return (
+                f"✓ Задача '{task_title}' уже находится в списке '{project_name}'"
+            )
+        
+        # ALWAYS use create+delete method for reliable task move with ALL data preserved
+        self.logger.info(
+            f"Moving task {command.task_id} from project {current_project_id} "
+            f"to {target_project_id} via create+delete (preserving all data)"
+        )
+        
         try:
-            update_params = {"task_id": command.task_id, "project_id": target_project_id}
+            # Step 1: Get FULL task data via GET request
+            self.logger.info(f"Step 1: Getting full task data for {command.task_id}")
+            original_task = await self.client.get(
+                endpoint=f"/open/{self.api_version}/project/{current_project_id}/task/{command.task_id}",
+                headers=self.client._get_headers(),
+            )
+            
+            if not original_task:
+                raise ValueError(f"Задача {command.task_id} не найдена в проекте {current_project_id}")
+            
+            self.logger.info(f"Retrieved task with fields: {list(original_task.keys())}")
+            
+            # Step 2: Prepare new task data - copy ALL fields except system fields
+            from src.api.ticktick_client import _format_date_for_ticktick
+            
+            create_data = {
+                "title": original_task.get("title", ""),
+                "projectId": target_project_id,
+                "status": original_task.get("status", 0),
+            }
+            
+            # Copy all optional fields
+            fields_to_copy = {
+                "content": "content",
+                "desc": "desc",
+                "dueDate": "dueDate",
+                "startDate": "startDate",
+                "priority": "priority",
+                "tags": "tags",
+                "reminders": "reminders",
+                "repeatFlag": "repeatFlag",
+                "isAllDay": "isAllDay",
+                "timeZone": "timeZone",
+                "kind": "kind",
+                "items": "items",
+            }
+            
+            for api_field, value_key in fields_to_copy.items():
+                if value_key in original_task:
+                    value = original_task[value_key]
+                    if value is not None:
+                        if api_field in ("dueDate", "startDate") and value:
+                            create_data[api_field] = _format_date_for_ticktick(str(value))
+                        else:
+                            create_data[api_field] = value
+            
             if target_column_id:
-                update_params["column_id"] = target_column_id
+                create_data["columnId"] = target_column_id
             
-            task_data = await self.client.update_task(**update_params)
-            self.logger.info(f"Task moved via update_task: {command.task_id} -> {target_project_id}")
+            self.logger.info(f"Step 2: Creating new task with {len(create_data)} fields")
             
-            # Verify move using direct GET request with retry logic
-            self.logger.debug(f"Verifying task move: {command.task_id} -> {target_project_id}")
-            task_verified = await self.client.verify_task_in_project(
-                task_id=command.task_id,
-                project_id=target_project_id,
-                max_retries=3
+            # Step 3: Create new task in target project
+            created_task = await self.client.post(
+                endpoint=f"/open/{self.api_version}/task",
+                headers=self.client._get_headers(),
+                json_data=create_data,
             )
             
-            if task_verified:
-                # Update cache with new project_id and column_id
-                project_name = target_project.get('name', target_project_id) if target_project else target_project_id
-                current_task_info = self.cache.get_task_data(command.task_id)
-                
-                cache_params = {
-                    "task_id": command.task_id,
-                    "title": current_task_info.get('title', '') if current_task_info else '',
-                    "project_id": target_project_id,
-                    "status": current_task_info.get('status', 'active') if current_task_info else 'active',
-                }
-                if target_column_id:
-                    cache_params["column_id"] = target_column_id
-                
-                self.cache.save_task(**cache_params)
-                self.logger.info(f"Task successfully moved and verified: {command.task_id} -> {target_project_id}")
-                
-                # Get task title for response
-                task_title = command.title
-                if not task_title:
-                    task_info = self.cache.get_task_data(command.task_id)
-                    if task_info:
-                        task_title = task_info.get('title', 'задача')
-                
-                if target_column_id:
-                    columns = await self.column_cache.get_columns(target_project_id)
-                    target_column = next((c for c in columns if c.get('id') == target_column_id), None)
-                    column_name = target_column.get('name', '') if target_column else ''
-                    return (
-                        f"✓ Задача '{task_title}' перемещена\n\n"
-                        f"📁 Новый список: {project_name}\n"
-                        f"📋 Секция: {column_name}"
-                    )
-                else:
-                    return (
-                        f"✓ Задача '{task_title}' перемещена\n\n"
-                        f"📁 Новый список: {project_name}"
-                    )
-            else:
-                # Verification failed, use fallback
-                self.logger.warning(
-                    f"Task move verification failed for {command.task_id} -> {target_project_id}, "
-                    f"using fallback method (create+delete)"
-                )
-                raise ValueError("Move verification failed")
-                    
-        except (ValueError, Exception) as move_error:
-            # Fallback: create new task in target project and delete old one
-            # This handles both verification failures and update_task errors
-            error_type = type(move_error).__name__
-            self.logger.info(
-                f"Using fallback move method (create+delete) due to {error_type}: {move_error}"
-            )
+            new_task_id = created_task.get("id")
+            if not new_task_id:
+                raise ValueError("Не удалось создать задачу в целевом проекте")
             
-            # Fallback logic: create new task and delete old one
+            self.logger.info(f"Created new task: {new_task_id}")
+            
+            # Step 4: Verify new task was created successfully
             try:
-                # Get full task data
+                verify_task = await self.client.get(
+                    endpoint=f"/open/{self.api_version}/project/{target_project_id}/task/{new_task_id}",
+                    headers=self.client._get_headers(),
+                )
+                if not verify_task:
+                    raise ValueError("Созданная задача не найдена при проверке")
+                self.logger.info(f"Verified new task exists: {new_task_id}")
+            except Exception as verify_error:
+                self.logger.error(f"Failed to verify new task: {verify_error}")
                 try:
-                    full_task = await self.client.get(
-                        endpoint=f"/open/{self.api_version}/project/{current_project_id}/task/{command.task_id}",
-                        headers=self.client._get_headers(),
-                    )
-                except Exception as get_error:
-                    # If we can't get full task, use cached data
-                    self.logger.warning(f"Could not get full task data: {get_error}, using cached data")
-                    full_task = {
-                        'title': current_task_info.get('title', ''),
-                        'priority': current_task_info.get('priority', 0),
-                        'tags': current_task_info.get('tags', []),
-                        'content': current_task_info.get('notes', ''),
-                    }
-                
-                # Create new task in target project
-                new_task_data = {
-                    'title': full_task.get('title', current_task_info.get('title', '')),
-                    'project_id': target_project_id,
-                }
-                
-                # Copy optional fields
-                for field in ['priority', 'tags', 'notes', 'due_date', 'repeat_flag', 'reminders']:
-                    if field in full_task and full_task[field] is not None:
-                        new_task_data[field] = full_task[field]
-                    elif field == 'notes' and 'content' in full_task:
-                        new_task_data['notes'] = full_task.get('content')
-                
-                new_task = await self.client.create_task(**new_task_data)
-                new_task_id = new_task.get('id')
-                
-                # Delete old task
-                try:
-                    await self.client.delete_task(command.task_id, current_project_id)
-                except Exception as delete_error:
-                    self.logger.warning(f"Could not delete old task: {delete_error}")
-                    # Continue anyway - task was created in new project
-                
-                # If target_column_id specified, update the new task with column
-                if target_column_id:
-                    await self.client.update_task(
-                        task_id=new_task_id,
-                        column_id=target_column_id,
-                    )
-                
-                # Update cache: remove old, add new with mapping
-                self.cache._cache.pop(command.task_id, None)
-                cache_params = {
-                    "task_id": new_task_id,
-                    "title": new_task_data.get('title', ''),
-                    "project_id": target_project_id,
-                    "status": 'active',
-                    "original_task_id": command.task_id,  # Save mapping for reference
-                }
-                if target_column_id:
-                    cache_params["column_id"] = target_column_id
-                
-                self.cache.save_task(**cache_params)
-                
-                project_name = target_project.get('name', target_project_id) if target_project else target_project_id
-                self.logger.info(f"Task moved via create+delete: {command.task_id} -> {new_task_id} (in {target_project_id})")
-                
-                # Get task title for response
-                task_title = new_task_data.get('title', 'задача')
-                
-                if target_column_id:
-                    columns = await self.column_cache.get_columns(target_project_id)
-                    target_column = next((c for c in columns if c.get('id') == target_column_id), None)
-                    column_name = target_column.get('name', '') if target_column else ''
-                    return (
-                        f"✓ Задача '{task_title}' перемещена (использован метод создания новой задачи)\n\n"
-                        f"📁 Новый список: {project_name}\n"
-                        f"📋 Секция: {column_name}\n"
-                        f"🆔 ID новой задачи: {new_task_id}"
-                    )
-                else:
-                    return (
-                        f"✓ Задача '{task_title}' перемещена (использован метод создания новой задачи)\n\n"
-                        f"📁 Новый список: {project_name}\n"
-                        f"🆔 ID новой задачи: {new_task_id}"
-                    )
+                    await self.client.delete_task(new_task_id, target_project_id)
+                except:
+                    pass
+                raise ValueError(f"Не удалось проверить созданную задачу: {verify_error}")
+            
+            # Step 5: Delete original task
+            self.logger.info(f"Step 3: Deleting original task {command.task_id}")
+            try:
+                await self.client.delete_task(command.task_id, current_project_id)
+                self.logger.info("Original task deleted")
+            except Exception as delete_error:
+                self.logger.warning(f"Failed to delete original task: {delete_error}")
+            
+            # Step 6: Update cache
+            task_title = original_task.get("title", command.title or "")
+            old_task_info = self.cache.get_task_data(command.task_id)
+            
+            cache_params = {
+                "task_id": new_task_id,
+                "title": task_title,
+                "project_id": target_project_id,
+                "status": "active" if original_task.get("status", 0) == 0 else "completed",
+                "original_task_id": command.task_id,
+            }
+            
+            # Preserve metadata from cache
+            if old_task_info:
+                if "tags" in old_task_info:
+                    cache_params["tags"] = old_task_info["tags"]
+                if "notes" in old_task_info:
+                    cache_params["notes"] = old_task_info["notes"]
+                if "reminders" in old_task_info:
+                    cache_params["reminders"] = old_task_info["reminders"]
+                if "repeat_flag" in old_task_info:
+                    cache_params["repeat_flag"] = old_task_info["repeat_flag"]
+                if "kind" in old_task_info:
+                    cache_params["kind"] = old_task_info["kind"]
+                self.cache.mark_as_deleted(command.task_id)
+            
+            # Also preserve from original_task
+            if "tags" not in cache_params and original_task.get("tags"):
+                cache_params["tags"] = original_task["tags"]
+            if "reminders" not in cache_params and original_task.get("reminders"):
+                cache_params["reminders"] = original_task["reminders"]
+            if "repeatFlag" not in cache_params and original_task.get("repeatFlag"):
+                cache_params["repeat_flag"] = original_task["repeatFlag"]
+            if "kind" not in cache_params and original_task.get("kind"):
+                cache_params["kind"] = original_task["kind"]
+            
+            if target_column_id:
+                cache_params["column_id"] = target_column_id
+            
+            self.cache.save_task(**cache_params)
+            self.logger.info(f"Cache updated: old task {command.task_id} -> new task {new_task_id}")
+            
+            # Step 7: Format success message
+            project_name = target_project.get('name', target_project_id) if target_project else target_project_id
+            
+            if target_column_id:
+                columns = await self.column_cache.get_columns(target_project_id)
+                target_column = next((c for c in columns if c.get('id') == target_column_id), None)
+                column_name = target_column.get('name', '') if target_column else ''
+                return (
+                    f"✓ Задача '{task_title}' перемещена\n\n"
+                    f"📁 Новый список: {project_name}\n"
+                    f"📋 Секция: {column_name}"
+                )
+            else:
+                return (
+                    f"✓ Задача '{task_title}' перемещена\n\n"
+                    f"📁 Новый список: {project_name}"
+                )
                     
-            except Exception as fallback_error:
-                self.logger.error(f"Error in fallback move method: {fallback_error}", exc_info=True)
-                raise
+        except Exception as move_error:
+            error_type = type(move_error).__name__
+            self.logger.error(
+                f"Error moving task via create+delete: {error_type}: {move_error}",
+                exc_info=True
+            )
+            raise ValueError(
+                f"Не удалось переместить задачу: {str(move_error)}. "
+                f"Попробуйте позже или проверьте, что задача существует."
+            )
     
 
