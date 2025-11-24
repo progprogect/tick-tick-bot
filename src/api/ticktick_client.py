@@ -974,4 +974,73 @@ class TickTickClient(BaseAPIClient):
             # Continue without Inbox - better than failing completely
         
         return projects
+    
+    async def create_project(
+        self,
+        name: str,
+        color: Optional[str] = None,
+        view_mode: Optional[str] = None,
+        kind: Optional[str] = None,
+        sort_order: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """
+        Create a new project/list
+        
+        According to TickTick API documentation:
+        POST /open/v1/project
+        
+        Args:
+            name: Project name
+            color: Project color (hex format, e.g., "#F18181")
+            view_mode: View mode ("list" or "kanban")
+            kind: Project kind ("TASK" or "NOTE")
+            sort_order: Sort order (optional)
+            
+        Returns:
+            Created project data
+        """
+        if not self.access_token:
+            await self.authenticate()
+        
+        project_data = {
+            "name": name,
+        }
+        
+        if color:
+            project_data["color"] = color
+        if view_mode:
+            project_data["viewMode"] = view_mode
+        if kind:
+            project_data["kind"] = kind
+        if sort_order is not None:
+            project_data["sortOrder"] = sort_order
+        
+        return await self.post(
+            endpoint=f"/open/{TICKTICK_API_VERSION}/project",
+            headers=self._get_headers(),
+            json_data=project_data,
+        )
+    
+    async def delete_project(self, project_id: str) -> bool:
+        """
+        Delete a project/list
+        
+        According to TickTick API documentation:
+        DELETE /open/v1/project/{projectId}
+        
+        Args:
+            project_id: Project ID to delete
+            
+        Returns:
+            True if successful
+        """
+        if not self.access_token:
+            await self.authenticate()
+        
+        await self.delete(
+            endpoint=f"/open/{TICKTICK_API_VERSION}/project/{project_id}",
+            headers=self._get_headers(),
+        )
+        
+        return True
 
