@@ -2,9 +2,6 @@
 Services module
 """
 
-from .task_search_service import TaskSearchService
-from .project_cache_service import ProjectCacheService
-from .column_cache_service import ColumnCacheService
-
-
+# Lazy imports to avoid circular dependencies and import errors
+# Import only when needed, not at module level
 
