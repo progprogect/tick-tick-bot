@@ -63,7 +63,7 @@ class TaskModifier:
                 raise ValueError("Нет изменений для применения")
             
             # 3. Map field names to TickTick API format
-            api_data = self._map_to_api_format(task_id, update_data, current_data)
+            api_data = await self._map_to_api_format(task_id, update_data, current_data)
             
             # 4. One API request
             await self.client.update_task(task_id, **api_data)
@@ -155,7 +155,7 @@ class TaskModifier:
         
         return modification.value
     
-    def _map_to_api_format(
+    async def _map_to_api_format(
         self,
         task_id: str,
         update_data: Dict[str, Any],
@@ -180,13 +180,34 @@ class TaskModifier:
         project_id = update_data.get("projectId") or current_data.get('project_id')
         if project_id:
             api_data["projectId"] = project_id
-        elif not project_id:
+        else:
             # Try to get from cache
             cached = self.cache.get_task_data(task_id)
             if cached and cached.get('project_id'):
                 api_data["projectId"] = cached.get('project_id')
             else:
-                raise ValueError("projectId is required for update, but not found in cache")
+                # Try to get from API if not in cache
+                try:
+                    all_tasks = await self.client.get_tasks()
+                    for task in all_tasks:
+                        if task.get('id') == task_id:
+                            project_id = task.get('projectId')
+                            if project_id:
+                                api_data["projectId"] = project_id
+                                # Save to cache for future use
+                                self.cache.save_task(
+                                    task_id=task_id,
+                                    title=task.get('title', ''),
+                                    project_id=project_id,
+                                )
+                                self.logger.debug(f"Got projectId from API for task {task_id}: {project_id}")
+                                break
+                    
+                    if not api_data.get("projectId"):
+                        raise ValueError(f"projectId is required for update, but not found in cache or API for task {task_id}")
+                except Exception as api_error:
+                    self.logger.warning(f"Failed to get projectId from API: {api_error}")
+                    raise ValueError(f"projectId is required for update, but not found in cache or API for task {task_id}")
         
         # Import date formatting function
         from src.api.ticktick_client import _format_date_for_ticktick

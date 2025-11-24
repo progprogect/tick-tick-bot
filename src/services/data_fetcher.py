@@ -583,6 +583,8 @@ class DataFetcher:
         Args:
             project_id: Project ID (optional)
             filters: Additional filters (status, start_date, end_date)
+                - status: -1 for overdue tasks, 0 for incomplete, 1 for completed
+                - start_date, end_date: Date range filters
             
         Returns:
             List of tasks
@@ -590,14 +592,53 @@ class DataFetcher:
         self.logger.debug(f"Fetching tasks (project_id: {project_id}, filters: {filters})")
         
         try:
-            tasks = await self.client.get_tasks(
-                project_id=project_id,
-                status=filters.get("status") if filters else None,
-                start_date=filters.get("start_date") if filters else None,
-                end_date=filters.get("end_date") if filters else None,
-            )
-            self.logger.debug(f"Fetched {len(tasks)} tasks")
-            return tasks
+            # Handle overdue tasks filter (status: -1)
+            status_filter = filters.get("status") if filters else None
+            if status_filter == -1:
+                # For overdue tasks, get all incomplete tasks and filter by dueDate < today
+                tasks = await self.client.get_tasks(
+                    project_id=project_id,
+                    status=0,  # Incomplete tasks only
+                )
+                
+                # Filter overdue tasks: dueDate < today
+                from datetime import datetime, timezone, timedelta
+                from src.config.constants import USER_TIMEZONE_OFFSET
+                
+                user_tz = timezone(timedelta(hours=USER_TIMEZONE_OFFSET))
+                today = datetime.now(user_tz).replace(hour=0, minute=0, second=0, microsecond=0)
+                
+                overdue_tasks = []
+                for task in tasks:
+                    due_date_str = task.get('dueDate')
+                    if due_date_str:
+                        try:
+                            due_date = datetime.fromisoformat(due_date_str.replace('Z', '+00:00'))
+                            if due_date.tzinfo is None:
+                                due_date = due_date.replace(tzinfo=timezone.utc)
+                            
+                            # Convert to user timezone for comparison
+                            if due_date.tzinfo != user_tz:
+                                due_date = due_date.astimezone(user_tz)
+                            
+                            if due_date < today:
+                                overdue_tasks.append(task)
+                        except Exception as e:
+                            self.logger.debug(f"Could not parse dueDate for task {task.get('id')}: {e}")
+                            continue
+                
+                self.logger.info(f"Fetched {len(overdue_tasks)} overdue tasks (from {len(tasks)} total)")
+                return overdue_tasks
+            else:
+                # Normal filter
+                tasks = await self.client.get_tasks(
+                    project_id=project_id,
+                    status=status_filter,
+                    start_date=filters.get("start_date") if filters else None,
+                    end_date=filters.get("end_date") if filters else None,
+                )
+                self.logger.debug(f"Fetched {len(tasks)} tasks")
+                return tasks
         except Exception as e:
             self.logger.error(f"Failed to fetch tasks: {e}", exc_info=True)
             return []

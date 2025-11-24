@@ -133,7 +133,9 @@ class SmartRouter:
                 result = await self._execute_group(group, context)
                 results.append(result)
             except Exception as e:
-                error_msg = f"Операция '{group.type.value}' не выполнена: {str(e)}"
+                # Handle both enum and string types
+                op_type_str = group.type.value if hasattr(group.type, 'value') else str(group.type)
+                error_msg = f"Операция '{op_type_str}' не выполнена: {str(e)}"
                 errors.append(error_msg)
                 self.logger.warning(f"Operation failed: {error_msg}")
                 # Continue with other operations
