@@ -73,7 +73,10 @@ class TaskModifier:
             
             # 6. Format response
             task_title = current_data.get('title', task_identifier or 'Задача')
-            return format_task_updated(task_title, update_data)
+            # Prepare task dict for formatter (needs title and update_data merged)
+            task_dict = {"title": task_title}
+            task_dict.update(update_data)
+            return format_task_updated(task_dict)
             
         except Exception as e:
             self.logger.error(f"Error modifying task: {e}", exc_info=True)
