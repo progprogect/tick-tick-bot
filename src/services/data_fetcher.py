@@ -624,12 +624,15 @@ class DataFetcher:
                     status=0,  # Incomplete tasks only
                 )
                 
-                # Filter overdue tasks: dueDate < today
+                # Filter overdue tasks: dueDate < today (in MSK timezone)
                 from datetime import datetime, timezone, timedelta
+                from src.utils.date_utils import get_current_datetime
                 from src.config.constants import USER_TIMEZONE_OFFSET
                 
-                user_tz = timezone(timedelta(hours=USER_TIMEZONE_OFFSET))
-                today = datetime.now(user_tz).replace(hour=0, minute=0, second=0, microsecond=0)
+                # Get today's date in MSK timezone (UTC+3)
+                current_dt = get_current_datetime()
+                today = current_dt.replace(hour=0, minute=0, second=0, microsecond=0)
+                user_tz = today.tzinfo
                 
                 overdue_tasks = []
                 for task in tasks:
