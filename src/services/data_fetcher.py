@@ -592,8 +592,31 @@ class DataFetcher:
         self.logger.debug(f"Fetching tasks (project_id: {project_id}, filters: {filters})")
         
         try:
+            # Check if this looks like a request for overdue tasks (even if GPT used wrong filter)
+            # If filters contain end_date with old date and status: 0, treat as overdue tasks request
+            if filters:
+                end_date = filters.get("end_date")
+                status_filter = filters.get("status")
+                
+                # If GPT incorrectly used status: 0 with end_date (old date), treat as overdue request
+                if end_date and status_filter == 0:
+                    try:
+                        from datetime import datetime
+                        from src.utils.date_utils import get_current_date_str
+                        filter_date = datetime.fromisoformat(end_date).date()
+                        current_date = datetime.fromisoformat(get_current_date_str()).date()
+                        
+                        # If end_date is in the past, this is likely an overdue tasks request
+                        if filter_date < current_date:
+                            self.logger.warning(
+                                f"Detected incorrect filter for overdue tasks: status={status_filter}, end_date={end_date}. "
+                                f"Treating as overdue tasks request (status: -1)"
+                            )
+                            status_filter = -1
+                    except Exception:
+                        pass
+            
             # Handle overdue tasks filter (status: -1)
-            status_filter = filters.get("status") if filters else None
             if status_filter == -1:
                 # For overdue tasks, get all incomplete tasks and filter by dueDate < today
                 tasks = await self.client.get_tasks(
