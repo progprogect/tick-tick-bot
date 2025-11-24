@@ -29,6 +29,58 @@ class GPTService:
         self.ticktick_client = ticktick_client
         self.logger = logger
     
+    @staticmethod
+    def _remove_json_comments(json_str: str) -> str:
+        """
+        Remove comments from JSON string (// and /* */)
+        JSON doesn't support comments, but GPT sometimes adds them
+        
+        Args:
+            json_str: JSON string potentially with comments
+            
+        Returns:
+            JSON string without comments
+        """
+        # Remove single-line comments (//)
+        # But be careful not to remove // in URLs or strings
+        lines = json_str.split('\n')
+        cleaned_lines = []
+        in_string = False
+        string_char = None
+        
+        for line in lines:
+            cleaned_line = []
+            i = 0
+            while i < len(line):
+                char = line[i]
+                
+                # Track string boundaries
+                if char in ('"', "'") and (i == 0 or line[i-1] != '\\'):
+                    if not in_string:
+                        in_string = True
+                        string_char = char
+                    elif char == string_char:
+                        in_string = False
+                        string_char = None
+                
+                # If we find // and we're not in a string, remove rest of line
+                if not in_string and i < len(line) - 1 and line[i:i+2] == '//':
+                    break  # Skip rest of line
+                
+                cleaned_line.append(char)
+                i += 1
+            
+            cleaned_lines.append(''.join(cleaned_line))
+        
+        json_str = '\n'.join(cleaned_lines)
+        
+        # Remove multi-line comments (/* */)
+        # Use regex to match /* ... */ but not inside strings
+        # Simple approach: remove /* */ blocks
+        json_str = re.sub(r'/\*.*?\*/', '', json_str, flags=re.DOTALL)
+        
+        return json_str
+    
     async def parse_command(self, command: str) -> ParsedCommand:
         """
         Parse user command using multi-stage GPT process
@@ -316,6 +368,9 @@ class GPTService:
                 json_str = json_str[:-3]
             json_str = json_str.strip()
             
+            # Remove JSON comments (// and /* */) before parsing
+            json_str = self._remove_json_comments(json_str)
+            
             try:
                 requirements = json.loads(json_str)
                 self.logger.info(f"[Stage 1] Requirements determined: {requirements}")
@@ -398,6 +453,9 @@ class GPTService:
             if json_str.endswith('```'):
                 json_str = json_str[:-3]
             json_str = json_str.strip()
+            
+            # Remove JSON comments (// and /* */) before parsing
+            json_str = self._remove_json_comments(json_str)
             
             try:
                 parsed_dict = json.loads(json_str)
