@@ -95,6 +95,21 @@ class TickTickBot:
             if not self.text_handler.validate(processed_text):
                 return "Сообщение слишком длинное или пустое."
             
+            # Check if this is a bulk_move command for overdue tasks - handle directly
+            # This bypasses GPT parsing to avoid issues with filter determination
+            processed_lower = processed_text.lower()
+            overdue_keywords = ["просроченные", "просрочено", "просроченные задачи"]
+            move_keywords = ["перенеси", "перенести", "перенос"]
+            
+            is_overdue_bulk_move = (
+                any(keyword in processed_lower for keyword in overdue_keywords) and
+                any(keyword in processed_lower for keyword in move_keywords)
+            )
+            
+            if is_overdue_bulk_move:
+                self.logger.info(f"[Direct] Detected overdue bulk_move command, bypassing GPT parsing: {processed_text}")
+                return await self._handle_overdue_bulk_move_direct(processed_text)
+            
             # Parse command using GPT
             parsed_command = await self.gpt_service.parse_command(processed_text)
             
@@ -108,6 +123,77 @@ class TickTickBot:
         except Exception as e:
             self.logger.error(f"Error handling message: {e}", exc_info=True)
             return format_error_message(e)
+    
+    async def _handle_overdue_bulk_move_direct(self, command_text: str) -> str:
+        """
+        Handle bulk_move for overdue tasks directly, bypassing GPT parsing
+        
+        Args:
+            command_text: User command text
+            
+        Returns:
+            Response message
+        """
+        from datetime import datetime, timedelta, timezone
+        from src.utils.date_parser import parse_date
+        from src.utils.formatters import format_date_for_user
+        from src.config.constants import USER_TIMEZONE_OFFSET
+        from src.utils.date_utils import get_current_datetime
+        
+        try:
+            # Get current date in MSK timezone
+            user_tz = timezone(timedelta(hours=USER_TIMEZONE_OFFSET))
+            current_dt = get_current_datetime()
+            from_date = current_dt
+            
+            # Parse target date from command
+            # Look for "на завтра", "завтра", "на сегодня", "сегодня", etc.
+            command_lower = command_text.lower()
+            to_date = None
+            
+            # Check for "завтра" / "tomorrow"
+            if "завтра" in command_lower or "tomorrow" in command_lower:
+                to_date = current_dt + timedelta(days=1)
+            # Check for "сегодня" / "today"
+            elif "сегодня" in command_lower or "today" in command_lower:
+                to_date = current_dt
+            else:
+                # Try to parse date from command using date_parser
+                parsed_date_iso = parse_date(command_text)
+                if parsed_date_iso:
+                    to_date = datetime.fromisoformat(parsed_date_iso)
+                    if to_date.tzinfo is None:
+                        to_date = to_date.replace(tzinfo=user_tz)
+                    else:
+                        to_date = to_date.astimezone(user_tz)
+                else:
+                    # Default to tomorrow if no date specified
+                    to_date = current_dt + timedelta(days=1)
+            
+            # Ensure to_date is timezone-aware
+            if to_date.tzinfo is None:
+                to_date = to_date.replace(tzinfo=user_tz)
+            else:
+                to_date = to_date.astimezone(user_tz)
+            
+            self.logger.info(
+                f"[Direct] Moving overdue tasks from {from_date.date()} to {to_date.date()} "
+                f"(MSK timezone)"
+            )
+            
+            # Execute bulk move directly via BatchProcessor
+            count = await self.batch_processor.move_overdue_tasks(
+                from_date=from_date,
+                to_date=to_date,
+            )
+            
+            # Format response
+            formatted_date = format_date_for_user(to_date)
+            return f"✓ Перенесено {count} просроченных задач на {formatted_date}"
+            
+        except Exception as e:
+            self.logger.error(f"[Direct] Error handling overdue bulk_move: {e}", exc_info=True)
+            return f"Ошибка при переносе просроченных задач: {str(e)}"
     
     async def handle_voice(self, voice_data: bytes, user_id: str) -> str:
         """

@@ -83,10 +83,11 @@ class BatchProcessor:
         try:
             from datetime import timezone, timedelta
             from src.config.constants import USER_TIMEZONE_OFFSET
+            from src.utils.date_utils import get_current_datetime
             
-            # Get current time with user timezone for filtering overdue tasks
-            user_tz = timezone(timedelta(hours=USER_TIMEZONE_OFFSET))
-            now = datetime.now(user_tz)
+            # Get current time in MSK timezone (UTC+3) for filtering overdue tasks
+            now = get_current_datetime()
+            user_tz = now.tzinfo
             
             # Get all incomplete tasks (without date filter to find all overdue tasks)
             # Note: GET endpoint may not work, so we return 0 if it fails
