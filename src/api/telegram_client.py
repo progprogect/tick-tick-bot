@@ -21,6 +21,7 @@ class TelegramClient:
         self.logger = logger
         self._message_handler: Optional[Callable[[str, str], Awaitable[str]]] = None
         self._voice_handler: Optional[Callable[[bytes, str], Awaitable[str]]] = None
+        self._polling_stopped = False  # Track if polling was stopped due to conflict
         
         # Add error handler for Conflict errors
         self.application.add_error_handler(self._handle_error)
@@ -202,9 +203,18 @@ class TelegramClient:
         if isinstance(error, Conflict):
             self.logger.warning(
                 f"Conflict error in polling loop: {error}. "
-                "Another bot instance is running. This is expected if multiple instances exist."
+                "Another bot instance is running. Stopping polling to avoid continuous errors."
             )
-            # Don't re-raise - just log and continue
+            # Mark polling as stopped
+            self._polling_stopped = True
+            # Stop polling to avoid continuous Conflict errors
+            try:
+                if hasattr(self.application, 'updater') and self.application.updater.running:
+                    await self.application.updater.stop()
+                    self.logger.info("Polling stopped due to Conflict error")
+            except Exception as stop_error:
+                self.logger.warning(f"Error stopping polling: {stop_error}")
+            # Don't re-raise - just log and stop polling
             return
         else:
             # Log other errors
@@ -257,16 +267,14 @@ class TelegramClient:
                     allowed_updates=["message", "callback_query"]
                 )
                 self.logger.info("Telegram bot started and polling")
+                self._polling_stopped = False
             except Conflict as e:
                 self.logger.warning(
-                    f"Telegram bot conflict detected: {e}. "
-                    "Another bot instance may be running. Stopping polling but keeping bot alive..."
+                    f"Telegram bot conflict detected at startup: {e}. "
+                    "Another bot instance may be running. Polling will not start."
                 )
-                # Stop polling to avoid continuous errors, but keep bot alive for web interface
-                try:
-                    await self.application.updater.stop()
-                except:
-                    pass
+                # Mark polling as stopped
+                self._polling_stopped = True
                 # Don't raise - allow bot to continue (for web interface compatibility)
                 self.logger.info("Telegram bot initialized (polling stopped due to conflict, web interface still available)")
         except Exception as e:
