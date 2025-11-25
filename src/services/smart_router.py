@@ -580,6 +580,7 @@ class SmartRouter:
         from datetime import datetime
         from src.models.command import ParsedCommand
         from src.utils.formatters import format_date_for_user
+        from src.utils.date_utils import get_current_datetime
         
         from_date = operation.params.get("fromDate")
         to_date = operation.params.get("toDate")
@@ -587,9 +588,24 @@ class SmartRouter:
         if not from_date or not to_date:
             raise ValueError("fromDate and toDate required for bulk_move")
         
-        # Parse dates
-        from_date_dt = datetime.fromisoformat(from_date.replace('Z', '+00:00'))
-        to_date_dt = datetime.fromisoformat(to_date.replace('Z', '+00:00'))
+        # Parse dates and ensure timezone-aware (MSK)
+        user_tz = get_current_datetime().tzinfo
+        
+        # Parse from_date
+        from_date_str = from_date.replace('Z', '+00:00') if 'Z' in from_date else from_date
+        from_date_dt = datetime.fromisoformat(from_date_str)
+        if from_date_dt.tzinfo is None:
+            from_date_dt = from_date_dt.replace(tzinfo=user_tz)
+        else:
+            from_date_dt = from_date_dt.astimezone(user_tz)
+        
+        # Parse to_date
+        to_date_str = to_date.replace('Z', '+00:00') if 'Z' in to_date else to_date
+        to_date_dt = datetime.fromisoformat(to_date_str)
+        if to_date_dt.tzinfo is None:
+            to_date_dt = to_date_dt.replace(tzinfo=user_tz)
+        else:
+            to_date_dt = to_date_dt.astimezone(user_tz)
         
         count = await self.batch_processor.move_overdue_tasks(
             from_date=from_date_dt,

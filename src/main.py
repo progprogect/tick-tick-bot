@@ -134,17 +134,16 @@ class TickTickBot:
         Returns:
             Response message
         """
-        from datetime import datetime, timedelta, timezone
+        from datetime import datetime, timedelta
         from src.utils.date_parser import parse_date
         from src.utils.formatters import format_date_for_user
-        from src.config.constants import USER_TIMEZONE_OFFSET
         from src.utils.date_utils import get_current_datetime
         
         try:
             # Get current date in MSK timezone
-            user_tz = timezone(timedelta(hours=USER_TIMEZONE_OFFSET))
             current_dt = get_current_datetime()
             from_date = current_dt
+            user_tz = current_dt.tzinfo  # Use timezone from get_current_datetime()
             
             # Parse target date from command
             # Look for "на завтра", "завтра", "на сегодня", "сегодня", etc.
@@ -162,6 +161,7 @@ class TickTickBot:
                 parsed_date_iso = parse_date(command_text)
                 if parsed_date_iso:
                     to_date = datetime.fromisoformat(parsed_date_iso)
+                    # Ensure timezone-aware and convert to MSK
                     if to_date.tzinfo is None:
                         to_date = to_date.replace(tzinfo=user_tz)
                     else:
@@ -170,11 +170,9 @@ class TickTickBot:
                     # Default to tomorrow if no date specified
                     to_date = current_dt + timedelta(days=1)
             
-            # Ensure to_date is timezone-aware
+            # Ensure to_date is timezone-aware (should already be, but double-check)
             if to_date.tzinfo is None:
                 to_date = to_date.replace(tzinfo=user_tz)
-            else:
-                to_date = to_date.astimezone(user_tz)
             
             self.logger.info(
                 f"[Direct] Moving overdue tasks from {from_date.date()} to {to_date.date()} "
