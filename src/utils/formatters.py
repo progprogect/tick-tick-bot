@@ -252,3 +252,26 @@ def format_project_deleted(project_name: str) -> str:
     """
     return f"✓ Проект '{project_name}' удален"
 
+
+def format_date_for_user(date: datetime) -> str:
+    """
+    Format datetime object for user-friendly display
+    
+    Args:
+        date: Datetime object (timezone-aware or naive)
+        
+    Returns:
+        Formatted date string (e.g., "25.11.2025")
+    """
+    try:
+        # If timezone-aware, convert to local timezone for display
+        if date.tzinfo is not None:
+            # Use the date as-is, just format it
+            return date.strftime('%d.%m.%Y')
+        else:
+            # Naive datetime, format as-is
+            return date.strftime('%d.%m.%Y')
+    except Exception:
+        # Fallback: try to convert to string
+        return str(date.date() if hasattr(date, 'date') else date)
+
