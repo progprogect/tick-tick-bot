@@ -21,23 +21,32 @@ def _format_date_for_ticktick(date_str: str) -> str:
         date_str: Date string in ISO format or other formats
         
     Returns:
-        Formatted date string for TickTick API
+        Formatted date string for TickTick API (always in UTC)
     """
     if not date_str:
         return ""
     
     try:
+        from datetime import timezone
+        from src.utils.date_utils import USER_TIMEZONE
+        
         # Try to parse ISO format
         if "T" in date_str:
             # Already has time component
             dt = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
         else:
-            # Date only, assume midnight
-            dt = datetime.fromisoformat(date_str)
+            # Date only, assume midnight in user timezone
+            dt = datetime.fromisoformat(date_str).replace(tzinfo=USER_TIMEZONE)
+        
+        # Ensure timezone-aware
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=USER_TIMEZONE)
+        
+        # Convert to UTC before formatting
+        dt_utc = dt.astimezone(timezone.utc)
         
         # Format to TickTick API format: "yyyy-MM-dd'T'HH:mm:ssZ"
-        # Remove microseconds and format with timezone
-        formatted = dt.strftime("%Y-%m-%dT%H:%M:%S+0000")
+        formatted = dt_utc.strftime("%Y-%m-%dT%H:%M:%S+0000")
         return formatted
     except Exception as e:
         logger.warning(f"Failed to format date '{date_str}': {e}")
