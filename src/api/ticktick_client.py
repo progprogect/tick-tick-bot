@@ -369,7 +369,11 @@ class TickTickClient(BaseAPIClient):
             task_data["projectId"] = project_id
         
         if due_date is not None:
-            task_data["dueDate"] = _format_date_for_ticktick(due_date)
+            # Handle deadline removal: if due_date is empty string or special marker, set to null
+            if due_date == "" or due_date == "__REMOVE_DATE__":
+                task_data["dueDate"] = None
+            else:
+                task_data["dueDate"] = _format_date_for_ticktick(due_date)
         
         if priority is not None:
             task_data["priority"] = priority
@@ -393,8 +397,12 @@ class TickTickClient(BaseAPIClient):
         # Fields that need formatting: dueDate, startDate, completedTime
         date_fields = {"dueDate", "startDate", "completedTime"}
         for field in date_fields:
-            if field in task_data and task_data[field] is not None:
-                task_data[field] = _format_date_for_ticktick(str(task_data[field]))
+            if field in task_data:
+                if task_data[field] is None or task_data[field] == "" or task_data[field] == "__REMOVE_DATE__":
+                    # Set to null to remove date field
+                    task_data[field] = None
+                elif task_data[field] is not None:
+                    task_data[field] = _format_date_for_ticktick(str(task_data[field]))
         
         # Ensure we have at least one field to update
         if not task_data:

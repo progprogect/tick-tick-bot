@@ -152,6 +152,10 @@ class TaskModifier:
                     current_reminders = []
                 reminders_to_remove = modification.value if isinstance(modification.value, list) else [modification.value]
                 return [rem for rem in current_reminders if rem not in reminders_to_remove]
+            elif field_name in ["dueDate", "due_date", "startDate", "start_date"]:
+                # For date fields, use special marker to indicate removal
+                # This will be handled in _map_to_api_format to send null to API
+                return "__REMOVE_DATE__"
             else:
                 # For other fields, remove means set to None or empty
                 return None
@@ -239,8 +243,12 @@ class TaskModifier:
         for field_name, value in update_data.items():
             api_field = field_mapping.get(field_name, field_name)
             
+            # Handle date field removal (special marker)
+            if api_field in date_fields and value == "__REMOVE_DATE__":
+                # Set to null to remove date field in TickTick API
+                api_data[api_field] = None
             # Format date fields according to TickTick API format
-            if api_field in date_fields and value is not None:
+            elif api_field in date_fields and value is not None:
                 api_data[api_field] = _format_date_for_ticktick(str(value))
             else:
                 api_data[api_field] = value
