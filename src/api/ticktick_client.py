@@ -17,11 +17,15 @@ def _format_date_for_ticktick(date_str: str) -> str:
     Format date string to TickTick API format: "yyyy-MM-dd'T'HH:mm:ssZ"
     Example: "2019-11-13T03:00:00+0000"
     
+    IMPORTANT: TickTick API interprets time in the user's timezone.
+    If we send "2025-11-28T12:00:00+0000", TickTick interprets it as 12:00 in user's timezone (MSK),
+    not as 12:00 UTC. So we should send time directly in MSK format without converting to UTC.
+    
     Args:
-        date_str: Date string in ISO format or other formats
+        date_str: Date string in ISO format (should be in MSK timezone, e.g., "2025-11-28T12:00:00+03:00")
         
     Returns:
-        Formatted date string for TickTick API (always in UTC)
+        Formatted date string for TickTick API (time in MSK, formatted as +0000 for API compatibility)
     """
     if not date_str:
         return ""
@@ -42,11 +46,18 @@ def _format_date_for_ticktick(date_str: str) -> str:
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=USER_TIMEZONE)
         
-        # Convert to UTC before formatting
-        dt_utc = dt.astimezone(timezone.utc)
+        # IMPORTANT: TickTick interprets time in user's timezone, not UTC
+        # So we keep the time as-is (in MSK) but format it as +0000 for API compatibility
+        # The actual time value should be what user specified in MSK
+        # Example: User says "12:00 MSK" -> we send "12:00:00+0000" and TickTick interprets it as 12:00 MSK
         
-        # Format to TickTick API format: "yyyy-MM-dd'T'HH:mm:ssZ"
-        formatted = dt_utc.strftime("%Y-%m-%dT%H:%M:%S+0000")
+        # Extract time components from MSK datetime
+        time_str = dt.strftime("%H:%M:%S")
+        date_str_only = dt.strftime("%Y-%m-%d")
+        
+        # Format as if it's UTC, but with MSK time values
+        # TickTick will interpret this as local time (MSK)
+        formatted = f"{date_str_only}T{time_str}+0000"
         return formatted
     except Exception as e:
         logger.warning(f"Failed to format date '{date_str}': {e}")
