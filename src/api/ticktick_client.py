@@ -46,14 +46,20 @@ def _format_date_for_ticktick(date_str: str) -> str:
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=USER_TIMEZONE)
         
+        # CRITICAL: Convert to MSK timezone before extracting time components
+        # If GPT returned UTC time (e.g., "2025-11-28T09:00:00+00:00" for 12:00 MSK),
+        # we need to convert it to MSK first, then extract the MSK time
+        # Example: UTC "09:00:00" -> MSK "12:00:00" -> send "12:00:00+0000" to TickTick
+        dt_msk = dt.astimezone(USER_TIMEZONE)
+        
         # IMPORTANT: TickTick interprets time in user's timezone, not UTC
         # So we keep the time as-is (in MSK) but format it as +0000 for API compatibility
         # The actual time value should be what user specified in MSK
         # Example: User says "12:00 MSK" -> we send "12:00:00+0000" and TickTick interprets it as 12:00 MSK
         
-        # Extract time components from MSK datetime
-        time_str = dt.strftime("%H:%M:%S")
-        date_str_only = dt.strftime("%Y-%m-%d")
+        # Extract time components from MSK datetime (after conversion)
+        time_str = dt_msk.strftime("%H:%M:%S")
+        date_str_only = dt_msk.strftime("%Y-%m-%d")
         
         # Format as if it's UTC, but with MSK time values
         # TickTick will interpret this as local time (MSK)
