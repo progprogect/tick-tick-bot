@@ -368,6 +368,7 @@ class PromptManager:
    - Для просроченных задач ОБЯЗАТЕЛЬНО используй status: -1 (БЕЗ end_date или start_date)
    - Для задач на конкретную дату используй start_date и end_date с той же датой
 8. Если команда содержит "отметь задачу X выполненной", "заверши задачу Y", "выполни задачу Z" - используй action_type: "complete_task"
+9. КРИТИЧЕСКИ ВАЖНО: Команды "убери дедлайн", "удали дедлайн", "сними дедлайн", "убери срок" - это НЕ complete_task! Это update_task с modifier "remove" для dueDate. complete_task используется ТОЛЬКО для завершения задачи, а не для удаления дедлайна!
 
 ПРИМЕРЫ:
 
@@ -663,7 +664,24 @@ class PromptManager:
   "action": "update_task",
   "taskId": "task_123",
   "dueDate": "2024-11-06T00:00:00+00:00"
-}""",
+}
+
+ПРИМЕР для удаления дедлайна (КРИТИЧЕСКИ ВАЖНО - это НЕ complete_task!):
+Команда: "Удали дедлайн из задачи купить молоко"
+Данные: {"tasks": {"купить молоко": {"id": "task_123", "title": "купить молоко", "projectId": "inbox123456"}}}
+Ответ (используй формат operations с modifier "remove"):
+{
+  "operations": [{
+    "type": "update_task",
+    "requires_current_data": false,
+    "task_identifier": {"type": "title", "value": "купить молоко"},
+    "modifications": {
+      "dueDate": {"value": null, "modifier": "remove"}
+    }
+  }]
+}
+
+ВАЖНО: Команды "убери дедлайн", "удали дедлайн", "сними дедлайн", "убери срок" - это НЕ complete_task! Это update_task с modifier "remove" для dueDate.""",
             
             "delete_task": """ПРИМЕР для delete_task:
 Команда: "Удали задачу купить молоко"
@@ -731,7 +749,8 @@ class PromptManager:
 ВАЖНО для complete_task:
 - Если команда содержит "отметь задачу X выполненной", "заверши задачу Y", "выполни задачу Z" - используй action: "complete_task"
 - Всегда указывай taskId из найденной задачи
-- Всегда указывай projectId из найденной задачи (требуется для API)""",
+- Всегда указывай projectId из найденной задачи (требуется для API)
+- КРИТИЧЕСКИ ВАЖНО: Команды "убери дедлайн", "удали дедлайн", "сними дедлайн", "убери срок" - это НЕ complete_task! Это update_task с modifier "remove" для dueDate. complete_task используется ТОЛЬКО для завершения задачи!""",
             
             "list_tasks": """ПРИМЕР для list_tasks:
 Команда: "Какие задачи у меня на сегодня?"
