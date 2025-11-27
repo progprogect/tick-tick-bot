@@ -69,9 +69,10 @@ def _format_date_for_ticktick(date_str: str) -> str:
         time_str = dt_msk.strftime("%H:%M:%S")
         date_str_only = dt_msk.strftime("%Y-%m-%d")
         
-        # Format as if it's UTC, but with MSK time values
-        # TickTick will interpret this as local time (MSK)
-        formatted = f"{date_str_only}T{time_str}+0000"
+        # IMPORTANT: TickTick API interprets +0000 as UTC and may add timezone offset
+        # To avoid this, we should send time with MSK offset (+0300) so TickTick doesn't add extra offset
+        # Format: "YYYY-MM-DDTHH:MM:SS+0300" for MSK timezone
+        formatted = f"{date_str_only}T{time_str}+0300"
         return formatted
     except Exception as e:
         logger.warning(f"Failed to format date '{date_str}': {e}")
