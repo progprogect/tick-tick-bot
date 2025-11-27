@@ -74,6 +74,12 @@ class PromptManager:
 - "append": Добавить к концу (например, "добавь заметку: не забыть")
 - "remove": Удалить из существующего (например, "удали тег важное")
 
+КРИТИЧЕСКИ ВАЖНО - УДАЛЕНИЕ ДЕДЛАЙНА:
+- Команды "убери дедлайн", "удали дедлайн", "сними дедлайн", "убери срок" - это НЕ complete_task!
+- Это update_task с modifier "remove" для поля dueDate
+- Пример: "удали дедлайн из задачи X" → {"operations": [{"type": "update_task", "task_identifier": {"type": "title", "value": "X"}, "modifications": {"dueDate": {"value": null, "modifier": "remove"}}}]}
+- complete_task используется ТОЛЬКО для команд "отметь выполненной", "заверши задачу", "выполни задачу"
+
 ПРАВИЛА ДЛЯ requires_current_data:
 - true: если есть modifier "merge" или "append" (нужны текущие данные для объединения)
 - false: если только modifier "replace" (можно заменить напрямую)
@@ -221,6 +227,30 @@ class PromptManager:
       "task_identifier": {"type": "title", "value": "Y"}
     }
   ]
+}
+
+11. "Удали дедлайн из задачи X" (удаление дедлайна - НЕ завершение задачи!):
+{
+  "operations": [{
+    "type": "update_task",
+    "requires_current_data": false,
+    "task_identifier": {"type": "title", "value": "X"},
+    "modifications": {
+      "dueDate": {"value": null, "modifier": "remove"}
+    }
+  }]
+}
+
+12. "Убери срок у задачи Y" (удаление дедлайна):
+{
+  "operations": [{
+    "type": "update_task",
+    "requires_current_data": false,
+    "task_identifier": {"type": "title", "value": "Y"},
+    "modifications": {
+      "dueDate": {"value": null, "modifier": "remove"}
+    }
+  }]
 }
 
 ВАЖНО:
